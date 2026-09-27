@@ -17,6 +17,7 @@
       </div>
       <div class="top-actions">
         <span id="environment" class="env-pill">INDIA PRODUCTION</span>
+        <span id="server-ip" class="ip-pill">IP: Detecting…</span>
         <span id="connection" class="connection disconnected">Checking connection…</span>
         <button id="refresh" type="button">Refresh</button>
         <a id="sign-out" href="/auth/logout" hidden>Sign out</a>
@@ -32,6 +33,15 @@
         </div>
         <div class="market-chip"><span>ETHUSD</span><strong id="eth-price">—</strong><small id="market-note">Delta market data</small></div>
       </section>
+
+      <div class="ip-box">
+        <div class="ip-box-content">
+          <span class="ip-box-label">🔑 Server Outbound IP for Delta Whitelist:</span>
+          <span id="ip-address-display" class="ip-box-val">Detecting IP…</span>
+          <button id="copy-ip-btn" type="button" class="copy-btn">Copy IP</button>
+        </div>
+        <span class="ip-box-sub">Enter this exact IP address into Delta Exchange API Key → IP Restriction (Read Data permission only).</span>
+      </div>
 
       <div id="notice" class="notice" role="status">Connecting to the local Delta MCP server…</div>
 

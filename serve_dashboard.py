@@ -42,13 +42,36 @@ def get_outbound_ip() -> str:
     global _cached_ip
     if _cached_ip:
         return _cached_ip
-    for endpoint in ("https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"):
+    endpoints = (
+        "https://api.ipify.org",
+        "https://checkip.amazonaws.com",
+        "https://icanhazip.com",
+        "https://ifconfig.me/ip",
+    )
+    try:
+        import requests
+        for endpoint in endpoints:
+            try:
+                resp = requests.get(endpoint, timeout=6, headers={"User-Agent": "curl/7.68.0"})
+                if resp.status_code == 200:
+                    ip = resp.text.strip()
+                    if ip and len(ip) <= 45 and "<" not in ip:
+                        _cached_ip = ip
+                        print(f"Detected outbound IP: {_cached_ip}", flush=True)
+                        return _cached_ip
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    for endpoint in endpoints:
         try:
             req = UrlRequest(endpoint, headers={"User-Agent": "curl/7.68.0"})
-            with urlopen(req, timeout=3) as resp:
+            with urlopen(req, timeout=6) as resp:
                 ip = resp.read().decode("utf-8").strip()
-                if ip:
+                if ip and len(ip) <= 45 and "<" not in ip:
                     _cached_ip = ip
+                    print(f"Detected outbound IP: {_cached_ip}", flush=True)
                     return _cached_ip
         except Exception:
             continue
@@ -367,6 +390,7 @@ def run_server(port: int = 8000):
                         not os.environ.get("DELTA_API_KEY") or not os.environ.get("DELTA_API_SECRET")):
         raise SystemExit("Public dashboard requires Google OAuth, a session secret, and both Delta API credential variables")
     bind = os.environ.get("HOST", "0.0.0.0" if (PUBLIC_MODE or os.environ.get("RENDER")) else "127.0.0.1")
+    threading.Thread(target=get_outbound_ip, daemon=True).start()
     server = ThreadingHTTPServer((bind, port), DashboardHandler)
     print(f"Delta account dashboard listening on {bind}:{port}", flush=True)
     try:

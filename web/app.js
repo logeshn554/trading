@@ -67,6 +67,19 @@ function setNotice(message, kind = 'warn') {
   el.className = `notice ${kind}`;
 }
 
+function updateIpDisplay(ip) {
+  if (!ip || ip === 'Unavailable') return;
+  const pill = byId('server-ip');
+  if (pill) {
+    pill.textContent = `IP: ${ip}`;
+    pill.title = `Click to copy ${ip}`;
+  }
+  const display = byId('ip-address-display');
+  if (display) {
+    display.textContent = ip;
+  }
+}
+
 function render(data) {
   const connected = data.connection === 'connected';
   byId('sign-out').hidden = !data.public_mode;
@@ -75,13 +88,22 @@ function render(data) {
   byId('connection').className = `connection ${connected ? 'connected' : 'disconnected'}`;
   byId('as-of').textContent = data.as_of ? `Last checked ${time(data.as_of)}` : 'Account data unavailable';
 
-  else if (data.connection === 'needs_read_data_key') {
-    const ipMsg = data.outbound_ip && data.outbound_ip !== 'Unavailable' ? ` — Server IP for Delta Whitelist: ${data.outbound_ip}` : '';
-    setNotice(`Delta MCP is running. Connect a Delta API key with Read Data permission${ipMsg}`, 'warn');
+  if (data.outbound_ip) {
+    updateIpDisplay(data.outbound_ip);
   }
-  else if (!connected) setNotice('Delta MCP account connection is unavailable.', 'error');
-  else if (Object.keys(data.errors || {}).length) setNotice(`Connected with incomplete data: ${Object.entries(data.errors).map(([key, value]) => `${key}: ${value}`).join('; ')}`, 'warn');
-  else setNotice('Live Delta account data received. No paper balances or simulated P&L are shown.', 'ok');
+
+  if (data.error) {
+    setNotice(data.error, 'error');
+  } else if (data.connection === 'needs_read_data_key') {
+    const ipMsg = data.outbound_ip && data.outbound_ip !== 'Unavailable' ? ` (Server IP: ${data.outbound_ip})` : '';
+    setNotice(`Delta MCP is running. Connect a Delta API key with Read Data permission${ipMsg}.`, 'warn');
+  } else if (!connected) {
+    setNotice('Delta MCP account connection is unavailable.', 'error');
+  } else if (Object.keys(data.errors || {}).length) {
+    setNotice(`Connected with incomplete data: ${Object.entries(data.errors).map(([key, value]) => `${key}: ${value}`).join('; ')}`, 'warn');
+  } else {
+    setNotice('Live Delta account data received. No paper balances or simulated P&L are shown.', 'ok');
+  }
 
   const ticker = data.ticker?.result || data.ticker || {};
   byId('eth-price').textContent = num(field(ticker, 'mark_price', 'close', 'last_price', 'price'), 2);
@@ -180,5 +202,32 @@ async function refresh(fresh = false) {
 }
 
 byId('refresh').addEventListener('click', () => refresh(true));
+
+function copyIp() {
+  const display = byId('ip-address-display');
+  const ip = display ? display.textContent.trim() : '';
+  if (ip && ip !== 'Detecting IP…' && ip !== 'Unavailable') {
+    navigator.clipboard.writeText(ip).then(() => {
+      const btn = byId('copy-ip-btn');
+      if (btn) {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy IP'; }, 2000);
+      }
+    });
+  }
+}
+
+const copyBtn = byId('copy-ip-btn');
+if (copyBtn) copyBtn.addEventListener('click', copyIp);
+const ipPill = byId('server-ip');
+if (ipPill) ipPill.addEventListener('click', copyIp);
+
+// Fetch outbound IP immediately on page load
+fetch('/api/my-ip')
+  .then(r => r.json())
+  .then(d => { if (d.outbound_ip) updateIpDisplay(d.outbound_ip); })
+  .catch(() => {});
+
 refresh();
 setInterval(() => refresh(), 30000);
+
