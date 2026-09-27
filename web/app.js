@@ -75,8 +75,10 @@ function render(data) {
   byId('connection').className = `connection ${connected ? 'connected' : 'disconnected'}`;
   byId('as-of').textContent = data.as_of ? `Last checked ${time(data.as_of)}` : 'Account data unavailable';
 
-  if (data.error) setNotice(data.error, 'error');
-  else if (data.connection === 'needs_read_data_key') setNotice('Delta MCP is running. Connect a Delta API key with Read Data permission to show balances and P&L.', 'warn');
+  else if (data.connection === 'needs_read_data_key') {
+    const ipMsg = data.outbound_ip && data.outbound_ip !== 'Unavailable' ? ` — Server IP for Delta Whitelist: ${data.outbound_ip}` : '';
+    setNotice(`Delta MCP is running. Connect a Delta API key with Read Data permission${ipMsg}`, 'warn');
+  }
   else if (!connected) setNotice('Delta MCP account connection is unavailable.', 'error');
   else if (Object.keys(data.errors || {}).length) setNotice(`Connected with incomplete data: ${Object.entries(data.errors).map(([key, value]) => `${key}: ${value}`).join('; ')}`, 'warn');
   else setNotice('Live Delta account data received. No paper balances or simulated P&L are shown.', 'ok');

@@ -35,6 +35,24 @@ _pending_logins: dict[str, tuple[str, float]] = {}
 CLIENT = DeltaMcpClient(environment=MCP_ENV)
 _cache_lock = threading.Lock()
 _cache: dict[str, object] = {"at": 0.0, "data": None}
+_cached_ip: str | None = None
+
+
+def get_outbound_ip() -> str:
+    global _cached_ip
+    if _cached_ip:
+        return _cached_ip
+    for endpoint in ("https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"):
+        try:
+            req = UrlRequest(endpoint, headers={"User-Agent": "curl/7.68.0"})
+            with urlopen(req, timeout=3) as resp:
+                ip = resp.read().decode("utf-8").strip()
+                if ip:
+                    _cached_ip = ip
+                    return _cached_ip
+        except Exception:
+            continue
+    return "Unavailable"
 
 
 def _rows(payload: object) -> tuple[list[dict], str | None]:
@@ -108,6 +126,7 @@ def build_snapshot(client: DeltaMcpClient) -> dict:
     now = datetime.now(timezone.utc)
     result: dict = {
         "as_of": now.isoformat(), "environment": client.environment, "public_mode": PUBLIC_MODE,
+        "outbound_ip": get_outbound_ip(),
         "strategy": {"id": STRATEGY["strategy_id"], "live_orders_enabled": False,
                      "validation": "BLOCKED", "reason": STRATEGY["blockers"][0],
                      "risk_limits": STRATEGY["risk_limits"],
@@ -215,6 +234,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._send_json(snapshot(fresh=fresh))
             except (DeltaMcpError, ValueError) as exc:
                 self._send_json({"error": str(exc), "connection": "unavailable"}, 503)
+        elif parsed.path == "/api/my-ip":
+            self._send_json({"outbound_ip": get_outbound_ip()})
         elif parsed.path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
