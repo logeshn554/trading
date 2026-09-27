@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from ethresearch.delta_mcp import DeltaMcpClient, DeltaMcpError, unpack_tool_result
 import serve_dashboard
-from serve_dashboard import build_snapshot
+from serve_dashboard import build_snapshot, trading_readiness, STRATEGY
 
 
 class FakeDeltaMcp:
@@ -70,6 +70,13 @@ class DeltaDashboardTests(unittest.TestCase):
         self.assertEqual(data["connection"], "needs_read_data_key")
         self.assertEqual(data["wallets"], [])
         self.assertEqual(data["realized_pnl_open_positions"], {})
+
+    def test_live_trading_fails_closed_with_unset_limits_and_unvalidated_signal(self):
+        status = trading_readiness(STRATEGY)
+        self.assertFalse(status["can_enable"])
+        self.assertFalse(status["effective_enabled"])
+        self.assertTrue(any("risk limits" in reason for reason in status["blockers"]))
+        self.assertTrue(any("signal feed" in reason for reason in status["blockers"]))
 
     def test_public_dashboard_requires_google_session_for_account_api_and_files(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), serve_dashboard.DashboardHandler)

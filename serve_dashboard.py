@@ -83,13 +83,35 @@ def _pnl_by_asset(positions: list[dict], field: str) -> dict[str, str]:
     return {asset: str(value) for asset, value in sorted(totals.items())}
 
 
+def trading_readiness(strategy: dict) -> dict:
+    """Fail closed until the research and execution prerequisites are real."""
+    blockers = list(strategy.get("blockers", []))
+    limits = strategy.get("risk_limits", {})
+    needed = (
+        "max_trades_per_day", "daily_net_profit_target", "daily_max_loss",
+        "per_trade_stop_loss", "per_trade_take_profit",
+    )
+    if any(limits.get(name) is None for name in needed):
+        blockers.append("INR daily and per-trade risk limits are not configured")
+    if not strategy.get("backtest", {}).get("selection_pass"):
+        blockers.append("the saved strategy failed its research selection gate")
+    blockers.append("no validated continuous Delta signal feed or live order lifecycle is implemented")
+    return {
+        "requested_enabled": False,
+        "effective_enabled": False,
+        "can_enable": False,
+        "blockers": list(dict.fromkeys(blockers)),
+    }
+
+
 def build_snapshot(client: DeltaMcpClient) -> dict:
     now = datetime.now(timezone.utc)
     result: dict = {
         "as_of": now.isoformat(), "environment": client.environment, "public_mode": PUBLIC_MODE,
         "strategy": {"id": STRATEGY["strategy_id"], "live_orders_enabled": False,
                      "validation": "BLOCKED", "reason": STRATEGY["blockers"][0],
-                     "risk_limits": STRATEGY["risk_limits"]},
+                     "risk_limits": STRATEGY["risk_limits"],
+                     "trading_readiness": trading_readiness(STRATEGY)},
         "connection": "unavailable", "wallets": [], "positions": [],
         "fills": [], "fills_after": None, "transactions": [],
         "transactions_after": None, "open_orders": [],

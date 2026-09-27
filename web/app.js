@@ -143,6 +143,14 @@ function render(data) {
   byId('stop-loss').value = limitValue(limits.per_trade_stop_loss);
   byId('take-profit').value = limitValue(limits.per_trade_take_profit);
   byId('live-switch').textContent = data.strategy?.live_orders_enabled ? 'ON' : 'OFF · BLOCKED';
+  const blockers = data.strategy?.trading_readiness?.blockers || [];
+  const blockerList = byId('live-blockers');
+  blockerList.replaceChildren();
+  for (const reason of blockers) {
+    const item = document.createElement('li');
+    item.textContent = reason;
+    blockerList.append(item);
+  }
 }
 
 let busy = false;

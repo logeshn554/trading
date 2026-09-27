@@ -4,6 +4,8 @@ Private, read-only Delta Exchange account dashboard for ETH research. It shows l
 
 **Live order execution is blocked.** The main research candidate `EXP_021_023_WF_2025_flow10_strict_candle_h12` had 29 wins in 40 saved simulated trades (72.5%) and +$350.47 after modeled costs, but failed its selection gate. Its Delta-specific execution and forward validation remain incomplete. The dashboard's live switch is disabled; its INR trade and profit/loss limits are unset until supplied and implemented as enforced risk controls. The view must not be interpreted as an automatic trading bot.
 
+Adding a Delta key with Trading permission to Render does **not** activate order execution. The MCP bridge has a read-only tool allowlist, and the dashboard shows the exact blockers that keep the switch OFF. Delta's own trading tools have no rehearsal step or size cap; a validated signal feed, exchange-specific contract sizing and stop orders, durable order reconciliation, risk-limit enforcement, and testnet/forward validation are required before a real ON state can be implemented.
+
 ## Deploy on Render
 
 This repository contains a small Docker image and `render.yaml` Blueprint for an always-on paid Render web service. The image copies only the account dashboard, the Delta MCP bridge, and the strategy status JSON. It contains no datasets, research reports, local credentials, or order-submission code. Render's free web tier sleeps after inactivity, so the Blueprint uses its paid Starter service plan.
