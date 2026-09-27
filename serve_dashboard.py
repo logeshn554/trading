@@ -344,7 +344,7 @@ def run_server(port: int = 8000):
                         len(SESSION_SECRET) < 32 or
                         not os.environ.get("DELTA_API_KEY") or not os.environ.get("DELTA_API_SECRET")):
         raise SystemExit("Public dashboard requires Google OAuth, a session secret, and both Delta API credential variables")
-    bind = "0.0.0.0" if PUBLIC_MODE else "127.0.0.1"
+    bind = os.environ.get("HOST", "0.0.0.0" if (PUBLIC_MODE or os.environ.get("RENDER")) else "127.0.0.1")
     server = ThreadingHTTPServer((bind, port), DashboardHandler)
     print(f"Delta account dashboard listening on {bind}:{port}", flush=True)
     try:
