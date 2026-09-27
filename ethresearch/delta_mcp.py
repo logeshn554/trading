@@ -15,7 +15,8 @@ from typing import Any
 
 
 READ_TOOLS = frozenset({
-    "get_connection_status", "get_ticker", "get_wallet_balances",
+    "get_connection_status", "get_ticker", "get_recent_trades", "get_candles",
+    "get_product", "get_wallet_balances",
     "get_margined_positions", "get_wallet_transactions", "get_fills",
     "get_open_orders",
 })

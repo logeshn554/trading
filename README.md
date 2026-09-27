@@ -6,6 +6,8 @@ Private, read-only Delta Exchange account dashboard for ETH research. It shows l
 
 Adding a Delta key with Trading permission to Render does **not** activate order execution. The MCP bridge has a read-only tool allowlist, and the dashboard shows the exact blockers that keep the switch OFF. Delta's own trading tools have no rehearsal step or size cap; a validated signal feed, exchange-specific contract sizing and stop orders, durable order reconciliation, risk-limit enforcement, and testnet/forward validation are required before a real ON state can be implemented.
 
+A public-data probe on 2026-09-27 found that Delta's 1-hour candles omit taker-buy volume, while its 50 recent ETHUSD trades covered only about 11 seconds. The saved strategy needs six hours of taker-buy volume and was evaluated with Binance features. Entering a Trading key alone cannot supply or validate that missing signal.
+
 ## Deploy on Render
 
 This repository contains a small Docker image and `render.yaml` Blueprint for an always-on paid Render web service. The image copies only the account dashboard, the Delta MCP bridge, and the strategy status JSON. It contains no datasets, research reports, local credentials, or order-submission code. Render's free web tier sleeps after inactivity, so the Blueprint uses its paid Starter service plan.
