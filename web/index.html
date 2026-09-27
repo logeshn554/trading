@@ -20,11 +20,33 @@
         <span id="server-ip" class="ip-pill">IP: Detecting…</span>
         <span id="connection" class="connection disconnected">Checking connection…</span>
         <button id="refresh" type="button">Refresh</button>
+        <button id="lock-btn" type="button" class="lock-btn" title="Lock session with PIN">🔒 Lock</button>
         <a id="sign-out" href="/auth/logout" hidden>Sign out</a>
       </div>
     </header>
 
     <main>
+      <!-- Security OTP Access Modal -->
+      <div id="otp-modal" class="otp-modal-backdrop" style="display:none;">
+        <div class="otp-dialog">
+          <div class="otp-shield">🛡️</div>
+          <h2>Security Verification</h2>
+          <p class="otp-subtitle">Enter your 6-digit access PIN to unlock Delta account data and live trading controls.</p>
+          
+          <form id="otp-form" autocomplete="off">
+            <div class="otp-input-wrap">
+              <input type="password" id="otp-pin" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="Enter 6-digit PIN" required>
+            </div>
+            <div id="otp-alert" class="otp-alert" style="display:none;"></div>
+            <div id="lockout-timer" class="lockout-badge" style="display:none;">
+              <span class="pulse-dot"></span> Security cooldown: Please wait <strong id="lockout-seconds">30</strong>s
+            </div>
+            <button id="otp-submit-btn" type="submit" class="otp-submit-btn">Unlock Terminal</button>
+          </form>
+          <div class="otp-hint">Authorized access only · Protected with 30s security lockout on incorrect entry</div>
+        </div>
+      </div>
+
       <section class="intro">
         <div>
           <p class="eyebrow">LIVE ACCOUNT VIEW · READ ONLY</p>
@@ -81,17 +103,87 @@
       </section>
 
       <section class="strategy-bar"><div><p class="eyebrow">RESEARCH STRATEGY</p><strong id="strategy-name">EXP_021_023</strong><span id="strategy-reason">Validation status loading…</span></div><span id="strategy-state" class="ready-pill">VALIDATED · LIVE ACTIVE</span></section>
+      
       <section class="section-card trade-controls">
         <div class="section-head">
-          <div><p class="eyebrow">LIVE TRADING CONTROLS</p><h2>Order execution</h2></div>
+          <div><p class="eyebrow">LIVE TRADING CONTROLS</p><h2>Order execution &amp; Sizing</h2></div>
           <div style="display:flex;gap:10px;align-items:center;">
             <button id="live-switch" type="button" class="live-active-btn">LIVE ON · ACTIVE</button>
-            <button id="test-trade-btn" type="button" class="test-trade-btn">Test Trade (1 Contract)</button>
           </div>
         </div>
-        <p id="control-note" class="control-note">Live order execution is ACTIVE. Delta Trading Key is enabled with conservative 1-contract sizing and strict INR risk limits.</p>
+        <p id="control-note" class="control-note">Live order execution is ACTIVE. Delta Trading Key is enabled with conservative sizing and strict INR risk limits.</p>
         <ul id="live-blockers" class="control-blockers"></ul>
-        <div class="limit-grid">
+
+        <!-- Lot Sizing & Sufficient Balance Panel -->
+        <div class="lot-panel">
+          <div class="lot-panel-head">
+            <div>
+              <h3 class="lot-panel-title">Contract Lot Sizing</h3>
+              <span class="muted" style="font-size:12px;">ETHUSD Futures · Delta India (1 Lot = 0.001 ETH Notional)</span>
+            </div>
+            <span id="balance-status-badge" class="badge-sufficient">Checking balance…</span>
+          </div>
+
+          <div class="lot-selection-row">
+            <div class="lot-stepper-box">
+              <span class="lot-input-label">Number of Lots to Trade:</span>
+              <div class="stepper-controls">
+                <button type="button" id="lot-dec-btn" class="step-btn">−</button>
+                <input type="number" id="lot-size-input" value="1" min="1" max="100" step="1">
+                <button type="button" id="lot-inc-btn" class="step-btn">+</button>
+              </div>
+            </div>
+
+            <div class="lot-presets-box">
+              <span class="lot-input-label">Quick Lot Presets:</span>
+              <div class="preset-buttons">
+                <button type="button" class="preset-chip active" data-lots="1">1 Lot</button>
+                <button type="button" class="preset-chip" data-lots="2">2 Lots</button>
+                <button type="button" class="preset-chip" data-lots="5">5 Lots</button>
+                <button type="button" class="preset-chip" data-lots="10">10 Lots</button>
+                <button type="button" class="preset-chip" data-lots="25">25 Lots</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="sizing-metrics-grid">
+            <div class="calc-card">
+              <span class="calc-label">Selected Lots</span>
+              <strong id="disp-selected-lots">1 Lot (0.001 ETH)</strong>
+              <small class="muted" id="disp-notional-val">Notional: ~₹226.00</small>
+            </div>
+            <div class="calc-card">
+              <span class="calc-label">Required Margin (Est. 10x)</span>
+              <strong id="disp-req-margin">~₹23.00 INR</strong>
+              <small class="muted">Initial margin needed</small>
+            </div>
+            <div class="calc-card">
+              <span class="calc-label">Available Account Balance</span>
+              <strong id="disp-avail-balance">—</strong>
+              <small class="muted" id="disp-avail-note">Wallet balance</small>
+            </div>
+            <div class="calc-card">
+              <span class="calc-label">Buying Power Check</span>
+              <strong id="disp-buying-status" class="positive">Sufficient</strong>
+              <small class="muted" id="disp-buying-note">Ready to place orders</small>
+            </div>
+          </div>
+
+          <div id="balance-warning-alert" class="balance-warning-banner" style="display:none;">
+            ⚠️ <span id="balance-warning-text">Insufficient balance to buy the selected number of lots.</span>
+          </div>
+
+          <div class="trade-action-buttons">
+            <button id="buy-order-btn" type="button" class="action-btn-buy">
+              🟢 Buy / Long (<span class="dyn-lot-label">1</span> Lot)
+            </button>
+            <button id="sell-order-btn" type="button" class="action-btn-sell">
+              🔴 Sell / Short (<span class="dyn-lot-label">1</span> Lot)
+            </button>
+          </div>
+        </div>
+
+        <div class="limit-grid" style="margin-top: 15px;">
           <label>Maximum trades per day<input id="max-trades" type="text" value="5" disabled></label>
           <label>Daily net profit target · INR<input id="profit-target" type="text" value="₹1,200.00" disabled></label>
           <label>Daily maximum loss · INR<input id="daily-loss" type="text" value="₹1,000.00" disabled></label>
@@ -100,7 +192,7 @@
         </div>
       </section>
     </main>
-    <footer>Delta India Account & Live Trading · Real-time market data & order controls</footer>
+    <footer>Delta India Account &amp; Live Trading · Real-time market data &amp; order controls</footer>
   </div>
 </body>
 </html>

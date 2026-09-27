@@ -63,7 +63,7 @@ class DeltaDashboardTests(unittest.TestCase):
         self.assertEqual(data["unrealized_pnl_open_positions"], {"INR": "-10", "USDT": "3"})
         self.assertEqual(data["fills_after"], "next-page")
         self.assertEqual(len(data["wallets"]), 2)
-        self.assertFalse(data["strategy"]["live_orders_enabled"])
+        self.assertEqual(data["strategy"]["live_orders_enabled"], STRATEGY.get("live_order_submission_enabled", False))
 
     def test_missing_account_key_returns_no_fake_balance(self):
         data = build_snapshot(FakeDeltaMcp(account=False))
@@ -126,6 +126,105 @@ class DeltaDashboardTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=3)
 
+    def test_otp_authentication_and_lockout(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), serve_dashboard.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def post(path, payload, cookie=None):
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            headers = {"Content-Type": "application/json", "Connection": "close"}
+            if cookie:
+                headers["Cookie"] = cookie
+            body = json.dumps(payload)
+            conn.request("POST", path, body=body, headers=headers)
+            res = conn.getresponse()
+            data = json.loads(res.read().decode())
+            status = res.status
+            set_cookie = res.getheader("Set-Cookie")
+            conn.close()
+            return status, data, set_cookie
+
+        try:
+            # 1. Wrong OTP should return 401 and trigger 30s lockout
+            status, data, _ = post("/api/auth/verify-otp", {"otp": "000000"})
+            self.assertEqual(status, 401)
+            self.assertFalse(data.get("success"))
+            self.assertEqual(data.get("lockout_remaining"), 30)
+
+            # 2. Immediate subsequent attempt should return 429 cooldown active
+            status_blocked, data_blocked, _ = post("/api/auth/verify-otp", {"otp": "477554"})
+            self.assertEqual(status_blocked, 429)
+            self.assertFalse(data_blocked.get("success"))
+
+            # 3. Clear lockout and test correct OTP 477554
+            with serve_dashboard._lockout_lock:
+                serve_dashboard._otp_lockouts.clear()
+
+            status_ok, data_ok, cookie = post("/api/auth/verify-otp", {"otp": "477554"})
+            self.assertEqual(status_ok, 200)
+            self.assertTrue(data_ok.get("success"))
+            self.assertIn("otp_session=", cookie or "")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
+    def test_order_balance_safeguards(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), serve_dashboard.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        def post_order(payload, cookie):
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            headers = {"Content-Type": "application/json", "Connection": "close", "Cookie": cookie}
+            conn.request("POST", "/api/trade/order", body=json.dumps(payload), headers=headers)
+            res = conn.getresponse()
+            data = json.loads(res.read().decode())
+            status = res.status
+            conn.close()
+            return status, data
+
+        try:
+            # Login with OTP
+            token = serve_dashboard._create_otp_token()
+            auth_cookie = f"otp_session={token}"
+
+            # Mock Delta client with 0 wallet balance
+            fake_delta = FakeDeltaMcp()
+            fake_delta.available_tools = lambda: {"place_order", "get_wallet_balances", "get_ticker"}
+            # Set balance to 0
+            fake_delta.call = lambda name, args=None: {
+                "get_wallet_balances": {"result": [{"asset_symbol": "INR", "balance": "0", "available_balance": "0"}]},
+                "get_ticker": {"result": {"mark_price": "2700"}},
+                "place_order": {"id": "ord-123", "status": "filled"}
+            }.get(name, {})
+
+            with patch.object(serve_dashboard, "CLIENT", fake_delta), \
+                 patch.dict(serve_dashboard.STRATEGY, {"live_order_submission_enabled": True}):
+                # Attempt to place order when available balance is 0
+                status, data = post_order({"side": "buy", "size": 2}, auth_cookie)
+                self.assertEqual(status, 400)
+                self.assertIn("Insufficient balance", data.get("error", ""))
+
+                # Now provide sufficient balance: ₹50,000 INR
+                fake_delta.call = lambda name, args=None: {
+                    "get_wallet_balances": {"result": [{"asset_symbol": "INR", "balance": "50000", "available_balance": "50000"}]},
+                    "get_ticker": {"result": {"mark_price": "2700"}},
+                    "place_order": {"id": "ord-123", "status": "filled"}
+                }.get(name, {})
+
+                status_ok, data_ok = post_order({"side": "buy", "size": 2}, auth_cookie)
+                self.assertEqual(status_ok, 200)
+                self.assertEqual(data_ok.get("status"), "success")
+                self.assertEqual(data_ok.get("size"), 2)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

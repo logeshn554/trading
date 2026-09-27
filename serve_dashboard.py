@@ -30,12 +30,51 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_ALLOWED_EMAIL = os.environ.get("GOOGLE_ALLOWED_EMAIL", "")
 SESSION_SECRET = os.environ.get("DASHBOARD_SESSION_SECRET", "")
+OTP_SECRET = os.environ.get("OTP_SECRET") or SESSION_SECRET or "delta_india_otp_secret_477554"
+CORRECT_OTP = os.environ.get("DASHBOARD_OTP", "477554")
+OTP_LOCKOUT_SECONDS = 30.0
+_otp_lockouts: dict[str, float] = {}
+_lockout_lock = threading.Lock()
 _login_lock = threading.Lock()
 _pending_logins: dict[str, tuple[str, float]] = {}
 CLIENT = DeltaMcpClient(environment=MCP_ENV, allow_trading=STRATEGY.get("live_order_submission_enabled", False))
 _cache_lock = threading.Lock()
 _cache: dict[str, object] = {"at": 0.0, "data": None}
 _cached_ip: str | None = None
+
+
+def _create_otp_token() -> str:
+    expires = int(time.time() + 86400 * 7)  # 7 days session
+    payload = json.dumps({"otp_verified": True, "expires": expires})
+    encoded = base64.urlsafe_b64encode(payload.encode()).rstrip(b"=").decode()
+    signature = hmac.new(OTP_SECRET.encode(), encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _is_otp_token_valid(token: str | None) -> bool:
+    if not token or "." not in token:
+        return False
+    encoded, separator, signature = token.partition(".")
+    if not separator:
+        return False
+    expected = hmac.new(OTP_SECRET.encode(), encoded.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return False
+    try:
+        data = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        return bool(data.get("otp_verified") and int(data.get("expires", 0)) > time.time())
+    except Exception:
+        return False
+
+
+def _get_lockout_remaining(client_ip: str) -> int:
+    with _lockout_lock:
+        until = _otp_lockouts.get(client_ip, 0.0)
+        remaining = until - time.time()
+        if remaining <= 0:
+            _otp_lockouts.pop(client_ip, None)
+            return 0
+        return int(remaining) + 1
 
 
 def get_outbound_ip() -> str:
@@ -227,6 +266,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return  # OAuth callback URLs contain a short-lived authorization code.
         super().log_message(format, *args)
 
+    def _client_ip(self) -> str:
+        forwarded = self.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        if hasattr(self, "client_address") and self.client_address:
+            return str(self.client_address[0])
+        return "127.0.0.1"
+
+    def _otp_authenticated(self) -> bool:
+        token = self._cookie("otp_session")
+        return _is_otp_token_valid(token)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
@@ -241,22 +292,46 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if host_name not in {name.strip().lower() for name in allowed_hosts} and not host_name.endswith(".onrender.com"):
                 self.send_error(403, "Invalid host")
                 return
+
+        # OTP status check endpoint
+        if parsed.path == "/api/auth/otp-status":
+            client_ip = self._client_ip()
+            lockout = _get_lockout_remaining(client_ip)
+            self._send_json({
+                "authenticated": self._otp_authenticated(),
+                "lockout_remaining": lockout,
+                "otp_required": True,
+            })
+            return
+
         if PUBLIC_MODE and parsed.path == "/auth/login":
             self._start_google_login(host)
             return
         if PUBLIC_MODE and parsed.path == "/auth/callback":
             self._finish_google_login(parsed, host)
             return
-        if PUBLIC_MODE and parsed.path == "/auth/logout":
-            self._redirect("/auth/login", "dashboard_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
+        if parsed.path in {"/auth/logout", "/api/auth/logout"}:
+            self.send_response(200 if parsed.path.startswith("/api/") else 302)
+            if not parsed.path.startswith("/api/"):
+                self.send_header("Location", "/auth/login" if PUBLIC_MODE else "/")
+            self.send_header("Set-Cookie", "otp_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+            self.send_header("Set-Cookie", "dashboard_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
+            self.end_headers()
+            if parsed.path.startswith("/api/"):
+                self.wfile.write(b'{"success": true, "logged_out": true}')
             return
+
         if PUBLIC_MODE and not self._authenticated():
             if parsed.path.startswith("/api/"):
                 self._send_json({"error": "Google sign-in required"}, 401)
             else:
                 self._redirect("/auth/login")
             return
+
         if parsed.path == "/api/snapshot":
+            if not self._otp_authenticated() and not (PUBLIC_MODE and self._authenticated()):
+                self._send_json({"error": "OTP authentication required", "requires_otp": True}, 401)
+                return
             try:
                 fresh = parse_qs(parsed.query).get("fresh", ["0"])[0] == "1"
                 self._send_json(snapshot(fresh=fresh))
@@ -278,6 +353,62 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if PUBLIC_MODE and not self._authenticated():
             self._send_json({"error": "Google sign-in required"}, 401)
             return
+
+        # OTP Verification endpoint
+        if parsed.path == "/api/auth/verify-otp":
+            client_ip = self._client_ip()
+            lockout = _get_lockout_remaining(client_ip)
+            if lockout > 0:
+                self._send_json({
+                    "success": False,
+                    "error": f"Security cooldown active. Please wait {lockout} seconds before retrying.",
+                    "lockout_remaining": lockout,
+                }, 429)
+                return
+
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len) if content_len > 0 else b"{}"
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+            except Exception:
+                payload = {}
+
+            entered_otp = str(payload.get("otp", "")).strip()
+            if entered_otp == CORRECT_OTP:
+                with _lockout_lock:
+                    _otp_lockouts.pop(client_ip, None)
+                token = _create_otp_token()
+                cookie_str = f"otp_session={token}; Path=/; Max-Age=604800; HttpOnly; SameSite=Lax"
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Set-Cookie", cookie_str)
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
+                return
+            else:
+                with _lockout_lock:
+                    _otp_lockouts[client_ip] = time.time() + OTP_LOCKOUT_SECONDS
+                self._send_json({
+                    "success": False,
+                    "error": "Incorrect OTP. Security cooldown active: please wait 30 seconds before retrying.",
+                    "lockout_remaining": int(OTP_LOCKOUT_SECONDS),
+                }, 401)
+                return
+
+        if parsed.path == "/api/auth/logout":
+            cookie_str = "otp_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Set-Cookie", cookie_str)
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True, "logged_out": True}).encode("utf-8"))
+            return
+
+        # Ensure OTP is verified for trading controls
+        if not self._otp_authenticated() and not (PUBLIC_MODE and self._authenticated()):
+            self._send_json({"error": "OTP authentication required", "requires_otp": True}, 401)
+            return
+
         if parsed.path == "/api/trade/toggle":
             new_state = not STRATEGY.get("live_order_submission_enabled", False)
             STRATEGY["live_order_submission_enabled"] = new_state
@@ -290,20 +421,104 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 _cache["at"] = 0.0
             self._send_json({"live_orders_enabled": new_state})
             return
+
         elif parsed.path == "/api/trade/order":
             content_len = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_len) if content_len > 0 else b"{}"
             try:
                 payload = json.loads(body.decode("utf-8")) if body else {}
                 side = str(payload.get("side", "buy")).lower()
-                size = int(payload.get("size", 1))
-                max_size = int(STRATEGY.get("risk_limits", {}).get("contract_size", 1))
+                if side not in ("buy", "sell"):
+                    self._send_json({"error": "Invalid side. Must be 'buy' or 'sell'."}, 400)
+                    return
+
+                if not STRATEGY.get("live_order_submission_enabled", False):
+                    self._send_json({"error": "Live trading is currently PAUSED (OFF). Please toggle Live Trading ON to place orders."}, 400)
+                    return
+
+                try:
+                    size = int(payload.get("size", 1))
+                except (ValueError, TypeError):
+                    size = 1
+
+                if size < 1:
+                    self._send_json({"error": "Lot size must be at least 1."}, 400)
+                    return
+
+                max_size = int(STRATEGY.get("risk_limits", {}).get("contract_size", 100))
                 if size > max_size:
-                    size = max_size
+                    self._send_json({"error": f"Lot size {size} exceeds maximum allowable limit of {max_size} lots."}, 400)
+                    return
+
                 tools = CLIENT.available_tools()
                 if "place_order" not in tools:
                     self._send_json({"error": "place_order tool is unavailable. Verify that your Delta API key has Trading permission enabled."}, 400)
                     return
+
+                # Balance & Margin pre-check
+                wallets_data = []
+                try:
+                    if "get_wallet_balances" in tools:
+                        w_res = CLIENT.call("get_wallet_balances")
+                        wallets_data, _ = _rows(w_res)
+                except Exception:
+                    pass
+
+                avail_inr = Decimal("0")
+                avail_usdt = Decimal("0")
+                has_wallet_data = False
+                for w in wallets_data:
+                    has_wallet_data = True
+                    asset = str(w.get("asset_symbol", "")).upper()
+                    ab = _number(w.get("available_balance")) or Decimal("0")
+                    if asset == "INR":
+                        avail_inr += ab
+                    elif asset in ("USDT", "USD"):
+                        avail_usdt += ab
+
+                mark_price = Decimal("2600")
+                try:
+                    if "get_ticker" in tools:
+                        t_res = CLIENT.call("get_ticker", {"symbol": "ETHUSD"})
+                        t_obj = t_res.get("result", t_res) if isinstance(t_res, dict) else {}
+                        mp = _number(t_obj.get("mark_price") or t_obj.get("close"))
+                        if mp:
+                            mark_price = mp
+                except Exception:
+                    pass
+
+                # Estimated margin for Delta India ETHUSD contracts (0.001 ETH per contract at 10x leverage)
+                est_margin_inr = (mark_price * Decimal("0.001") * Decimal("87") / Decimal("10")) * Decimal(size)
+                est_margin_usdt = (mark_price * Decimal("0.001") / Decimal("10")) * Decimal(size)
+
+                # Sufficient balance check
+                if has_wallet_data:
+                    if avail_inr > 0:
+                        if avail_inr < est_margin_inr:
+                            self._send_json({
+                                "error": f"Insufficient balance: Placing {size} lot(s) requires ~₹{float(est_margin_inr):.2f} INR margin, but available balance is only ₹{float(avail_inr):.2f} INR. Please deposit funds or reduce lot count.",
+                                "required_margin": float(est_margin_inr),
+                                "available_balance": float(avail_inr),
+                                "currency": "INR",
+                            }, 400)
+                            return
+                    elif avail_usdt > 0:
+                        if avail_usdt < est_margin_usdt:
+                            self._send_json({
+                                "error": f"Insufficient balance: Placing {size} lot(s) requires ~${float(est_margin_usdt):.2f} USDT margin, but available balance is only ${float(avail_usdt):.2f} USDT. Please deposit funds or reduce lot count.",
+                                "required_margin": float(est_margin_usdt),
+                                "available_balance": float(avail_usdt),
+                                "currency": "USDT",
+                            }, 400)
+                            return
+                    else:
+                        self._send_json({
+                            "error": f"Insufficient balance: Your available wallet balance is 0. Cannot place order for {size} lot(s). Please deposit funds to Delta India before trading.",
+                            "required_margin": float(est_margin_inr),
+                            "available_balance": 0.0,
+                        }, 400)
+                        return
+
                 product_id = 27
                 try:
                     p = CLIENT.call("get_product", {"symbol": "ETHUSD"})
@@ -313,6 +528,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         product_id = p["result"]["id"]
                 except Exception:
                     pass
+
                 order_res = CLIENT.call("place_order", {
                     "product_id": product_id,
                     "size": size,
@@ -321,10 +537,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 })
                 with _cache_lock:
                     _cache["at"] = 0.0
-                self._send_json({"status": "success", "order": order_res})
+                self._send_json({"status": "success", "order": order_res, "size": size, "side": side})
             except Exception as exc:
                 self._send_json({"error": str(exc)}, 500)
             return
+
         self.send_error(404, "Unknown endpoint")
 
     def _cookie(self, name: str) -> str | None:

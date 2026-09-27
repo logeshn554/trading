@@ -2,6 +2,11 @@ const byId = id => document.getElementById(id);
 const numberFmt = new Intl.NumberFormat(undefined, {maximumFractionDigits: 6});
 const moneyFmt = new Intl.NumberFormat(undefined, {maximumFractionDigits: 2});
 
+let latestData = null;
+let selectedLots = 1;
+let lockoutInterval = null;
+let busy = false;
+
 function num(value, digits = 6) {
   if (value === null || value === undefined || value === '') return '—';
   const n = Number(value);
@@ -63,8 +68,10 @@ function settlementAsset(row) {
 
 function setNotice(message, kind = 'warn') {
   const el = byId('notice');
-  el.textContent = message;
-  el.className = `notice ${kind}`;
+  if (el) {
+    el.textContent = message;
+    el.className = `notice ${kind}`;
+  }
 }
 
 function updateIpDisplay(ip) {
@@ -80,7 +87,338 @@ function updateIpDisplay(ip) {
   }
 }
 
+/* ==================== OTP AUTHENTICATION & LOCKOUT ==================== */
+
+function showOtpModal() {
+  const modal = byId('otp-modal');
+  if (modal) modal.style.display = 'flex';
+  const pinInput = byId('otp-pin');
+  if (pinInput && !pinInput.disabled) {
+    pinInput.focus();
+  }
+}
+
+function hideOtpModal() {
+  const modal = byId('otp-modal');
+  if (modal) modal.style.display = 'none';
+  const alertEl = byId('otp-alert');
+  if (alertEl) alertEl.style.display = 'none';
+}
+
+function startLockoutTimer(seconds) {
+  if (lockoutInterval) clearInterval(lockoutInterval);
+  let remaining = Math.max(1, Math.round(seconds));
+
+  const pinInput = byId('otp-pin');
+  const submitBtn = byId('otp-submit-btn');
+  const timerBadge = byId('lockout-timer');
+  const timerSecs = byId('lockout-seconds');
+  const alertEl = byId('otp-alert');
+
+  if (pinInput) pinInput.disabled = true;
+  if (submitBtn) submitBtn.disabled = true;
+  if (timerBadge) timerBadge.style.display = 'flex';
+  if (timerSecs) timerSecs.textContent = remaining;
+  if (alertEl) {
+    alertEl.textContent = '❌ Incorrect PIN entered. Security cooldown active: Please wait 30 seconds.';
+    alertEl.style.display = 'block';
+  }
+
+  lockoutInterval = setInterval(() => {
+    remaining -= 1;
+    if (timerSecs) timerSecs.textContent = remaining;
+
+    if (remaining <= 0) {
+      clearInterval(lockoutInterval);
+      lockoutInterval = null;
+      if (pinInput) {
+        pinInput.disabled = false;
+        pinInput.value = '';
+        pinInput.focus();
+      }
+      if (submitBtn) submitBtn.disabled = false;
+      if (timerBadge) timerBadge.style.display = 'none';
+      if (alertEl) {
+        alertEl.textContent = 'Cooldown finished. You may enter your 6-digit PIN now.';
+        alertEl.style.display = 'block';
+      }
+    }
+  }, 1000);
+}
+
+async function checkOtpStatus() {
+  try {
+    const res = await fetch('/api/auth/otp-status', {cache: 'no-store'});
+    const data = await res.json();
+    if (!data.authenticated) {
+      showOtpModal();
+      if (data.lockout_remaining > 0) {
+        startLockoutTimer(data.lockout_remaining);
+      }
+      return false;
+    } else {
+      hideOtpModal();
+      return true;
+    }
+  } catch (err) {
+    showOtpModal();
+    return false;
+  }
+}
+
+const otpForm = byId('otp-form');
+if (otpForm) {
+  otpForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pinInput = byId('otp-pin');
+    const submitBtn = byId('otp-submit-btn');
+    const alertEl = byId('otp-alert');
+    const dialog = document.querySelector('.otp-dialog');
+    const pin = pinInput ? pinInput.value.trim() : '';
+
+    if (!pin || pin.length !== 6) {
+      if (alertEl) {
+        alertEl.textContent = 'Please enter all 6 digits of your PIN.';
+        alertEl.style.display = 'block';
+      }
+      return;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Verifying…';
+    }
+
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({otp: pin})
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        hideOtpModal();
+        if (pinInput) pinInput.value = '';
+        refresh(true);
+      } else {
+        if (dialog) {
+          dialog.classList.remove('shake');
+          void dialog.offsetWidth; // re-flow
+          dialog.classList.add('shake');
+        }
+        const lockout = data.lockout_remaining || 30;
+        startLockoutTimer(lockout);
+      }
+    } catch (err) {
+      if (alertEl) {
+        alertEl.textContent = 'Network error while verifying OTP: ' + err.message;
+        alertEl.style.display = 'block';
+      }
+    } finally {
+      if (submitBtn && (!lockoutInterval)) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Unlock Terminal';
+      }
+    }
+  });
+}
+
+const lockBtn = byId('lock-btn');
+if (lockBtn) {
+  lockBtn.addEventListener('click', async () => {
+    try {
+      await fetch('/api/auth/logout', {method: 'POST'});
+    } catch (e) {}
+    showOtpModal();
+    const pinInput = byId('otp-pin');
+    if (pinInput && !pinInput.disabled) {
+      pinInput.value = '';
+      pinInput.focus();
+    }
+  });
+}
+
+/* ==================== LOT SIZING & BALANCE VALIDATION ==================== */
+
+function updateLots(newLotCount) {
+  const maxLots = (latestData?.strategy?.risk_limits?.contract_size) || 100;
+  selectedLots = Math.max(1, Math.min(maxLots, parseInt(newLotCount, 10) || 1));
+
+  const lotInput = byId('lot-size-input');
+  if (lotInput && parseInt(lotInput.value, 10) !== selectedLots) {
+    lotInput.value = selectedLots;
+  }
+
+  // Update preset chips
+  document.querySelectorAll('.preset-chip').forEach(chip => {
+    const chipLots = parseInt(chip.dataset.lots, 10);
+    if (chipLots === selectedLots) {
+      chip.classList.add('active');
+    } else {
+      chip.classList.remove('active');
+    }
+  });
+
+  // Re-calculate margins and check balance
+  recalculateSizingAndBalance();
+}
+
+function recalculateSizingAndBalance() {
+  if (!latestData) return;
+
+  const ticker = latestData.ticker?.result || latestData.ticker || {};
+  const markPrice = Number(field(ticker, 'mark_price', 'close', 'last_price', 'price')) || 2600;
+
+  // Delta India ETHUSD: 1 lot = 0.001 ETH
+  const ethPerLot = 0.001;
+  const totalEth = selectedLots * ethPerLot;
+  const notionalUsd = totalEth * markPrice;
+  const usdToInr = 87.0; // Current approximate USD/INR conversion rate
+  const notionalInr = notionalUsd * usdToInr;
+
+  // 10x leverage margin requirement (~10%)
+  const leverage = 10;
+  const reqMarginInr = notionalInr / leverage;
+  const reqMarginUsd = notionalUsd / leverage;
+
+  // Extract available balances
+  const wallets = Array.isArray(latestData.wallets) ? latestData.wallets : [];
+  let availInr = 0;
+  let availUsd = 0;
+  let preferredAsset = 'INR';
+
+  wallets.forEach(w => {
+    const symbol = String(w.asset_symbol || '').toUpperCase();
+    const ab = Number(w.available_balance) || 0;
+    if (symbol === 'INR') availInr += ab;
+    if (symbol === 'USDT' || symbol === 'USD') availUsd += ab;
+  });
+
+  let availBal = 0;
+  let reqMargin = 0;
+  if (availInr > 0 || (availUsd === 0 && wallets.length > 0)) {
+    availBal = availInr;
+    reqMargin = reqMarginInr;
+    preferredAsset = 'INR';
+  } else {
+    availBal = availUsd;
+    reqMargin = reqMarginUsd;
+    preferredAsset = 'USDT';
+  }
+
+  // Update DOM labels
+  const lotsDisp = byId('disp-selected-lots');
+  if (lotsDisp) lotsDisp.textContent = `${selectedLots} Lot${selectedLots > 1 ? 's' : ''} (${totalEth.toFixed(3)} ETH)`;
+
+  const notionalDisp = byId('disp-notional-val');
+  if (notionalDisp) notionalDisp.textContent = `Notional: ~₹${moneyFmt.format(notionalInr)}`;
+
+  const reqMarginDisp = byId('disp-req-margin');
+  if (reqMarginDisp) reqMarginDisp.textContent = `~₹${moneyFmt.format(reqMarginInr)} INR`;
+
+  const availBalDisp = byId('disp-avail-balance');
+  if (availBalDisp) availBalDisp.textContent = `${moneyFmt.format(availBal)} ${preferredAsset}`;
+
+  const availNote = byId('disp-avail-note');
+  if (availNote) availNote.textContent = wallets.length ? `${wallets.length} active wallet asset(s)` : 'No wallet assets found';
+
+  document.querySelectorAll('.dyn-lot-label').forEach(el => {
+    el.textContent = selectedLots;
+  });
+
+  // Balance Sufficiency Evaluation
+  const isLive = Boolean(latestData.strategy?.live_orders_enabled);
+  const isFunded = availBal > 0;
+  const isSufficient = isFunded && (availBal >= reqMargin);
+
+  const statusBadge = byId('balance-status-badge');
+  const buyingStatus = byId('disp-buying-status');
+  const buyingNote = byId('disp-buying-note');
+  const warningBanner = byId('balance-warning-alert');
+  const warningText = byId('balance-warning-text');
+  const buyBtn = byId('buy-order-btn');
+  const sellBtn = byId('sell-order-btn');
+
+  if (isSufficient) {
+    if (statusBadge) {
+      statusBadge.className = 'badge-sufficient';
+      statusBadge.textContent = '🟢 Sufficient Balance';
+    }
+    if (buyingStatus) {
+      buyingStatus.className = 'positive';
+      buyingStatus.textContent = 'Sufficient';
+    }
+    if (buyingNote) buyingNote.textContent = 'Ready to execute live';
+    if (warningBanner) warningBanner.style.display = 'none';
+
+    if (buyBtn) {
+      buyBtn.disabled = !isLive;
+      buyBtn.title = isLive ? `Buy / Long ${selectedLots} lot(s)` : 'Live trading is paused';
+    }
+    if (sellBtn) {
+      sellBtn.disabled = !isLive;
+      sellBtn.title = isLive ? `Sell / Short ${selectedLots} lot(s)` : 'Live trading is paused';
+    }
+  } else {
+    // Insufficient Balance
+    if (statusBadge) {
+      statusBadge.className = 'badge-insufficient';
+      statusBadge.textContent = '🔴 Insufficient Balance';
+    }
+    if (buyingStatus) {
+      buyingStatus.className = 'negative';
+      buyingStatus.textContent = 'Insufficient';
+    }
+    if (buyingNote) {
+      buyingNote.textContent = `Need at least ~₹${moneyFmt.format(reqMarginInr)}`;
+    }
+    if (warningBanner) {
+      warningBanner.style.display = 'block';
+      if (warningText) {
+        if (!isFunded) {
+          warningText.textContent = `Your available balance is ₹0.00. Cannot place orders for ${selectedLots} lot(s). Please deposit funds to Delta India first.`;
+        } else {
+          warningText.textContent = `Insufficient balance: Placing ${selectedLots} lot(s) requires ~₹${moneyFmt.format(reqMarginInr)} margin, but your available balance is only ${moneyFmt.format(availBal)} ${preferredAsset}. Please deposit funds or reduce lot count.`;
+        }
+      }
+    }
+
+    if (buyBtn) {
+      buyBtn.disabled = true;
+      buyBtn.title = 'Cannot buy: Insufficient balance';
+    }
+    if (sellBtn) {
+      sellBtn.disabled = true;
+      sellBtn.title = 'Cannot sell: Insufficient balance';
+    }
+  }
+}
+
+// Stepper and Preset listeners
+const decBtn = byId('lot-dec-btn');
+if (decBtn) decBtn.addEventListener('click', () => updateLots(selectedLots - 1));
+
+const incBtn = byId('lot-inc-btn');
+if (incBtn) incBtn.addEventListener('click', () => updateLots(selectedLots + 1));
+
+const lotInput = byId('lot-size-input');
+if (lotInput) {
+  lotInput.addEventListener('change', () => updateLots(lotInput.value));
+  lotInput.addEventListener('input', () => updateLots(lotInput.value));
+}
+
+document.querySelectorAll('.preset-chip').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const lots = parseInt(btn.dataset.lots, 10);
+    if (lots) updateLots(lots);
+  });
+});
+
+/* ==================== DASHBOARD RENDERING ==================== */
+
 function render(data) {
+  latestData = data;
   const connected = data.connection === 'connected';
   byId('sign-out').hidden = !data.public_mode;
   byId('environment').textContent = data.environment === 'india_testnet' ? 'INDIA TESTNET' : 'INDIA PRODUCTION';
@@ -173,14 +511,14 @@ function render(data) {
   byId('take-profit').value = limitValue(limits.per_trade_take_profit);
 
   const switchBtn = byId('live-switch');
-  switchBtn.textContent = isLive ? 'LIVE ON · ACTIVE' : 'OFF · PAUSED';
+  switchBtn.textContent = isLive ? 'LIVE ON · ACTIVE' : 'LIVE OFF · PAUSED';
   switchBtn.className = isLive ? 'live-active-btn' : 'live-off-btn';
   switchBtn.disabled = false;
 
   const controlNote = byId('control-note');
   if (controlNote) {
     controlNote.textContent = isLive
-      ? 'Live order execution is ACTIVE. Delta Trading Key is enabled with conservative 1-contract sizing and strict INR risk limits.'
+      ? 'Live order execution is ACTIVE. Delta Trading Key is enabled with conservative sizing and strict INR risk limits.'
       : 'Live order execution is currently PAUSED. Click button above to resume.';
   }
 
@@ -192,9 +530,11 @@ function render(data) {
     item.textContent = reason;
     blockerList.append(item);
   }
+
+  // Update lot sizing and sufficient balance checks
+  recalculateSizingAndBalance();
 }
 
-let busy = false;
 async function refresh(fresh = false) {
   if (busy) return;
   busy = true;
@@ -204,7 +544,12 @@ async function refresh(fresh = false) {
   try {
     const response = await fetch(`/api/snapshot${fresh ? '?fresh=1' : ''}`, {cache: 'no-store'});
     if (response.status === 401) {
-      window.location.assign('/auth/login');
+      const body = await response.json().catch(() => ({}));
+      if (body.requires_otp) {
+        showOtpModal();
+      } else {
+        window.location.assign('/auth/login');
+      }
       return;
     }
     const data = await response.json();
@@ -239,13 +584,18 @@ if (copyBtn) copyBtn.addEventListener('click', copyIp);
 const ipPill = byId('server-ip');
 if (ipPill) ipPill.addEventListener('click', copyIp);
 
+// Live Trading Toggle Switch
 const liveSwitch = byId('live-switch');
 if (liveSwitch) {
   liveSwitch.addEventListener('click', async () => {
     liveSwitch.disabled = true;
     try {
       const res = await fetch('/api/trade/toggle', {method: 'POST'});
-      await res.json();
+      const data = await res.json();
+      if (data.requires_otp) {
+        showOtpModal();
+        return;
+      }
       refresh(true);
     } catch (err) {
       alert('Failed to toggle live trading: ' + err.message);
@@ -255,40 +605,73 @@ if (liveSwitch) {
   });
 }
 
-const testTradeBtn = byId('test-trade-btn');
-if (testTradeBtn) {
-  testTradeBtn.addEventListener('click', async () => {
-    if (!confirm('Submit a 1-contract test market BUY order on Delta India ETHUSD?')) return;
-    testTradeBtn.disabled = true;
-    testTradeBtn.textContent = 'Submitting…';
-    try {
-      const res = await fetch('/api/trade/order', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({side: 'buy', size: 1})
-      });
-      const data = await res.json();
-      if (data.status === 'success') {
-        alert('Test trade submitted successfully to Delta Exchange India!');
-        refresh(true);
-      } else {
-        alert('Delta order response: ' + (data.error || JSON.stringify(data)));
-      }
-    } catch (err) {
-      alert('Order failed: ' + err.message);
-    } finally {
-      testTradeBtn.disabled = false;
-      testTradeBtn.textContent = 'Test Trade (1 Contract)';
+// Order Submission Handler
+async function submitTradeOrder(side) {
+  const isLive = Boolean(latestData?.strategy?.live_orders_enabled);
+  if (!isLive) {
+    alert('Live Trading is currently OFF. Please turn ON Live Trading first.');
+    return;
+  }
+
+  const promptMsg = `Confirm Market ${side.toUpperCase()} Order:\n\nInstrument: ETHUSD (Delta India)\nLots: ${selectedLots} Contract(s)\nSide: ${side.toUpperCase()}\n\nDo you want to submit this live order now?`;
+  if (!confirm(promptMsg)) return;
+
+  const buyBtn = byId('buy-order-btn');
+  const sellBtn = byId('sell-order-btn');
+  if (buyBtn) buyBtn.disabled = true;
+  if (sellBtn) sellBtn.disabled = true;
+
+  try {
+    const res = await fetch('/api/trade/order', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({side, size: selectedLots})
+    });
+    const data = await res.json();
+
+    if (data.requires_otp) {
+      showOtpModal();
+      return;
     }
-  });
+
+    if (res.ok && data.status === 'success') {
+      alert(`Success! Market ${side.toUpperCase()} order for ${selectedLots} lot(s) placed on Delta India.`);
+      refresh(true);
+    } else {
+      alert(`Order Failed: ${data.error || JSON.stringify(data)}`);
+      refresh(true);
+    }
+  } catch (err) {
+    alert(`Order execution error: ${err.message}`);
+  } finally {
+    recalculateSizingAndBalance();
+  }
 }
 
-// Fetch outbound IP immediately on page load
+const buyOrderBtn = byId('buy-order-btn');
+if (buyOrderBtn) {
+  buyOrderBtn.addEventListener('click', () => submitTradeOrder('buy'));
+}
+
+const sellOrderBtn = byId('sell-order-btn');
+if (sellOrderBtn) {
+  sellOrderBtn.addEventListener('click', () => submitTradeOrder('sell'));
+}
+
+// Initial checks & poll loops
+checkOtpStatus().then(authed => {
+  if (authed) {
+    refresh();
+  }
+});
+
 fetch('/api/my-ip')
   .then(r => r.json())
   .then(d => { if (d.outbound_ip) updateIpDisplay(d.outbound_ip); })
   .catch(() => {});
 
-refresh();
-setInterval(() => refresh(), 30000);
-
+setInterval(() => {
+  if (!byId('otp-modal') || byId('otp-modal').style.display === 'none') {
+    refresh();
+  }
+}, 30000);
