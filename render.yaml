@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: eth-delta-account-dashboard
+    name: logeshn554-trading-dashboard
     runtime: docker
     plan: starter
     healthCheckPath: /health
