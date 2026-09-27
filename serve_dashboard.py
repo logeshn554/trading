@@ -186,11 +186,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._send_json({"status": "ok"})
             return
         host = self.headers.get("Host", "")
+        host_name = host.split(":", 1)[0].lower()
         allowed_hosts = {"127.0.0.1", "localhost"}
         if PUBLIC_MODE:
             allowed_hosts.update(filter(None, os.environ.get("DASHBOARD_ALLOWED_HOSTS", "").split(",")))
             allowed_hosts.add(os.environ.get("RENDER_EXTERNAL_HOSTNAME", ""))
-        if host.split(":", 1)[0].lower() not in {name.strip().lower() for name in allowed_hosts}:
+        if host_name not in {name.strip().lower() for name in allowed_hosts} and not (PUBLIC_MODE and host_name.endswith(".onrender.com")):
             self.send_error(403, "Local dashboard only")
             return
         if PUBLIC_MODE and parsed.path == "/auth/login":
