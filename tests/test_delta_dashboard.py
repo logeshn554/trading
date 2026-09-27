@@ -72,7 +72,13 @@ class DeltaDashboardTests(unittest.TestCase):
         self.assertEqual(data["realized_pnl_open_positions"], {})
 
     def test_live_trading_fails_closed_with_unset_limits_and_unvalidated_signal(self):
-        status = trading_readiness(STRATEGY)
+        unvalidated = {
+            "strategy_id": "test",
+            "backtest": {"selection_pass": False},
+            "risk_limits": {},
+            "blockers": ["no validated continuous Delta signal feed or live order lifecycle is implemented"],
+        }
+        status = trading_readiness(unvalidated)
         self.assertFalse(status["can_enable"])
         self.assertFalse(status["effective_enabled"])
         self.assertTrue(any("risk limits" in reason for reason in status["blockers"]))

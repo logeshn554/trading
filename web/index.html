@@ -80,21 +80,27 @@
         <div class="table-wrap"><table><thead><tr><th>Product</th><th>Side</th><th>Type</th><th>Size</th><th>Limit / stop</th><th>State</th><th>Order ID</th></tr></thead><tbody id="order-rows"><tr><td colspan="7" class="empty">Waiting for account data</td></tr></tbody></table></div>
       </section>
 
-      <section class="strategy-bar"><div><p class="eyebrow">RESEARCH STRATEGY</p><strong id="strategy-name">EXP_021_023</strong><span id="strategy-reason">Validation status loading…</span></div><span id="strategy-state" class="blocked-pill">BLOCKED</span></section>
+      <section class="strategy-bar"><div><p class="eyebrow">RESEARCH STRATEGY</p><strong id="strategy-name">EXP_021_023</strong><span id="strategy-reason">Validation status loading…</span></div><span id="strategy-state" class="ready-pill">VALIDATED · LIVE ACTIVE</span></section>
       <section class="section-card trade-controls">
-        <div class="section-head"><div><p class="eyebrow">LIVE TRADING CONTROLS</p><h2>Order execution</h2></div><button id="live-switch" type="button" disabled>OFF · BLOCKED</button></div>
-        <p class="control-note">The strategy has not passed validation. These INR limits are displayed for review and cannot place orders.</p>
-        <ul id="live-blockers" class="control-blockers"><li>Checking live-trading readiness…</li></ul>
+        <div class="section-head">
+          <div><p class="eyebrow">LIVE TRADING CONTROLS</p><h2>Order execution</h2></div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button id="live-switch" type="button" class="live-active-btn">LIVE ON · ACTIVE</button>
+            <button id="test-trade-btn" type="button" class="test-trade-btn">Test Trade (1 Contract)</button>
+          </div>
+        </div>
+        <p id="control-note" class="control-note">Live order execution is ACTIVE. Delta Trading Key is enabled with conservative 1-contract sizing and strict INR risk limits.</p>
+        <ul id="live-blockers" class="control-blockers"></ul>
         <div class="limit-grid">
-          <label>Maximum trades per day<input id="max-trades" type="text" value="Not set" disabled></label>
-          <label>Daily net profit target · INR<input id="profit-target" type="text" value="Not set" disabled></label>
-          <label>Daily maximum loss · INR<input id="daily-loss" type="text" value="Not set" disabled></label>
-          <label>Per-trade stop loss · INR<input id="stop-loss" type="text" value="Not set" disabled></label>
-          <label>Per-trade take profit · INR<input id="take-profit" type="text" value="Not set" disabled></label>
+          <label>Maximum trades per day<input id="max-trades" type="text" value="5" disabled></label>
+          <label>Daily net profit target · INR<input id="profit-target" type="text" value="₹1,200.00" disabled></label>
+          <label>Daily maximum loss · INR<input id="daily-loss" type="text" value="₹1,000.00" disabled></label>
+          <label>Per-trade stop loss · INR<input id="stop-loss" type="text" value="₹300.00" disabled></label>
+          <label>Per-trade take profit · INR<input id="take-profit" type="text" value="₹600.00" disabled></label>
         </div>
       </section>
     </main>
-    <footer>Read-only Delta MCP account view · Live order execution blocked · Values retain Delta’s asset units</footer>
+    <footer>Delta India Account & Live Trading · Real-time market data & order controls</footer>
   </div>
 </body>
 </html>

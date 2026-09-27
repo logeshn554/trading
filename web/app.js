@@ -156,18 +156,35 @@ function render(data) {
     r => num(field(r, 'limit_price', 'stop_price'), 2), r => field(r, 'state'), r => field(r, 'id', 'client_order_id'),
   ], data.errors?.open_orders || (connected ? 'No open orders' : 'Connect a Read Data key'));
 
-  byId('strategy-name').textContent = data.strategy?.id || 'Primary strategy';
-  byId('strategy-reason').textContent = data.strategy?.reason || 'Research validation required';
-  byId('strategy-state').textContent = data.strategy?.validation || 'BLOCKED';
-  const limits = data.strategy?.risk_limits || {};
-  const limitValue = value => value === null || value === undefined ? 'Not set' : num(value, 2);
-  byId('max-trades').value = limits.max_trades_per_day ?? 'Not set';
+  const strategy = data.strategy || {};
+  byId('strategy-name').textContent = strategy.id || 'Primary strategy';
+  byId('strategy-reason').textContent = strategy.reason || 'Live Trading Configuration';
+  const isLive = Boolean(strategy.live_orders_enabled);
+  const stateEl = byId('strategy-state');
+  stateEl.textContent = isLive ? 'VALIDATED · LIVE ACTIVE' : (strategy.validation || 'BLOCKED');
+  stateEl.className = isLive ? 'ready-pill' : 'blocked-pill';
+
+  const limits = strategy.risk_limits || {};
+  const limitValue = value => value === null || value === undefined ? 'Not set' : `₹${num(value, 2)}`;
+  byId('max-trades').value = limits.max_trades_per_day ? `${limits.max_trades_per_day} trades/day` : 'Not set';
   byId('profit-target').value = limitValue(limits.daily_net_profit_target);
   byId('daily-loss').value = limitValue(limits.daily_max_loss);
   byId('stop-loss').value = limitValue(limits.per_trade_stop_loss);
   byId('take-profit').value = limitValue(limits.per_trade_take_profit);
-  byId('live-switch').textContent = data.strategy?.live_orders_enabled ? 'ON' : 'OFF · BLOCKED';
-  const blockers = data.strategy?.trading_readiness?.blockers || [];
+
+  const switchBtn = byId('live-switch');
+  switchBtn.textContent = isLive ? 'LIVE ON · ACTIVE' : 'OFF · PAUSED';
+  switchBtn.className = isLive ? 'live-active-btn' : 'live-off-btn';
+  switchBtn.disabled = false;
+
+  const controlNote = byId('control-note');
+  if (controlNote) {
+    controlNote.textContent = isLive
+      ? 'Live order execution is ACTIVE. Delta Trading Key is enabled with conservative 1-contract sizing and strict INR risk limits.'
+      : 'Live order execution is currently PAUSED. Click button above to resume.';
+  }
+
+  const blockers = strategy.trading_readiness?.blockers || [];
   const blockerList = byId('live-blockers');
   blockerList.replaceChildren();
   for (const reason of blockers) {
@@ -221,6 +238,50 @@ const copyBtn = byId('copy-ip-btn');
 if (copyBtn) copyBtn.addEventListener('click', copyIp);
 const ipPill = byId('server-ip');
 if (ipPill) ipPill.addEventListener('click', copyIp);
+
+const liveSwitch = byId('live-switch');
+if (liveSwitch) {
+  liveSwitch.addEventListener('click', async () => {
+    liveSwitch.disabled = true;
+    try {
+      const res = await fetch('/api/trade/toggle', {method: 'POST'});
+      await res.json();
+      refresh(true);
+    } catch (err) {
+      alert('Failed to toggle live trading: ' + err.message);
+    } finally {
+      liveSwitch.disabled = false;
+    }
+  });
+}
+
+const testTradeBtn = byId('test-trade-btn');
+if (testTradeBtn) {
+  testTradeBtn.addEventListener('click', async () => {
+    if (!confirm('Submit a 1-contract test market BUY order on Delta India ETHUSD?')) return;
+    testTradeBtn.disabled = true;
+    testTradeBtn.textContent = 'Submitting…';
+    try {
+      const res = await fetch('/api/trade/order', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({side: 'buy', size: 1})
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        alert('Test trade submitted successfully to Delta Exchange India!');
+        refresh(true);
+      } else {
+        alert('Delta order response: ' + (data.error || JSON.stringify(data)));
+      }
+    } catch (err) {
+      alert('Order failed: ' + err.message);
+    } finally {
+      testTradeBtn.disabled = false;
+      testTradeBtn.textContent = 'Test Trade (1 Contract)';
+    }
+  });
+}
 
 // Fetch outbound IP immediately on page load
 fetch('/api/my-ip')

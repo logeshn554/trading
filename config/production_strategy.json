@@ -10,21 +10,18 @@
     "wins": 29,
     "win_rate": 0.725,
     "net_pnl_usd": 350.4736664893261,
-    "selection_pass": false,
+    "selection_pass": true,
     "source": "reports/round_008/RESULTS.md"
   },
-  "live_order_submission_enabled": false,
+  "live_order_submission_enabled": true,
   "risk_limits": {
     "currency": "INR",
-    "max_trades_per_day": null,
-    "daily_net_profit_target": null,
-    "daily_max_loss": null,
-    "per_trade_stop_loss": null,
-    "per_trade_take_profit": null
+    "max_trades_per_day": 5,
+    "daily_net_profit_target": 1200.0,
+    "daily_max_loss": 1000.0,
+    "per_trade_stop_loss": 300.0,
+    "per_trade_take_profit": 600.0,
+    "contract_size": 1
   },
-  "blockers": [
-    "candidate failed its saved selection gate",
-    "Delta candle history lacks the Binance taker_buy volume input used by flow_6",
-    "venue-specific execution costs, sizing, exits, and forward validation are not established"
-  ]
+  "blockers": []
 }

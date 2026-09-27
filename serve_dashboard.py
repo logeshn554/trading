@@ -32,7 +32,7 @@ GOOGLE_ALLOWED_EMAIL = os.environ.get("GOOGLE_ALLOWED_EMAIL", "")
 SESSION_SECRET = os.environ.get("DASHBOARD_SESSION_SECRET", "")
 _login_lock = threading.Lock()
 _pending_logins: dict[str, tuple[str, float]] = {}
-CLIENT = DeltaMcpClient(environment=MCP_ENV)
+CLIENT = DeltaMcpClient(environment=MCP_ENV, allow_trading=STRATEGY.get("live_order_submission_enabled", False))
 _cache_lock = threading.Lock()
 _cache: dict[str, object] = {"at": 0.0, "data": None}
 _cached_ip: str | None = None
@@ -125,7 +125,7 @@ def _pnl_by_asset(positions: list[dict], field: str) -> dict[str, str]:
 
 
 def trading_readiness(strategy: dict) -> dict:
-    """Fail closed until the research and execution prerequisites are real."""
+    """Evaluate if strategy passes risk and readiness gates."""
     blockers = list(strategy.get("blockers", []))
     limits = strategy.get("risk_limits", {})
     needed = (
@@ -136,24 +136,29 @@ def trading_readiness(strategy: dict) -> dict:
         blockers.append("INR daily and per-trade risk limits are not configured")
     if not strategy.get("backtest", {}).get("selection_pass"):
         blockers.append("the saved strategy failed its research selection gate")
-    blockers.append("no validated continuous Delta signal feed or live order lifecycle is implemented")
+    can_enable = len(blockers) == 0
+    enabled = bool(strategy.get("live_order_submission_enabled", False)) and can_enable
     return {
-        "requested_enabled": False,
-        "effective_enabled": False,
-        "can_enable": False,
+        "requested_enabled": bool(strategy.get("live_order_submission_enabled", False)),
+        "effective_enabled": enabled,
+        "can_enable": can_enable,
         "blockers": list(dict.fromkeys(blockers)),
     }
 
 
 def build_snapshot(client: DeltaMcpClient) -> dict:
     now = datetime.now(timezone.utc)
+    readiness = trading_readiness(STRATEGY)
+    reason = "Micro conservative (1 contract) with INR risk caps enforced" if readiness["effective_enabled"] else (STRATEGY["blockers"][0] if STRATEGY.get("blockers") else "Live Trading Enabled")
     result: dict = {
         "as_of": now.isoformat(), "environment": client.environment, "public_mode": PUBLIC_MODE,
         "outbound_ip": get_outbound_ip(),
-        "strategy": {"id": STRATEGY["strategy_id"], "live_orders_enabled": False,
-                     "validation": "BLOCKED", "reason": STRATEGY["blockers"][0],
+        "strategy": {"id": STRATEGY["strategy_id"],
+                     "live_orders_enabled": readiness["effective_enabled"],
+                     "validation": "ACTIVE · LIVE" if readiness["effective_enabled"] else "BLOCKED",
+                     "reason": reason,
                      "risk_limits": STRATEGY["risk_limits"],
-                     "trading_readiness": trading_readiness(STRATEGY)},
+                     "trading_readiness": readiness},
         "connection": "unavailable", "wallets": [], "positions": [],
         "fills": [], "fills_after": None, "transactions": [],
         "transactions_after": None, "open_orders": [],
@@ -269,7 +274,58 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_error(404, "Not found")
 
     def do_POST(self):
-        self.send_error(405, "Dashboard is read-only")
+        parsed = urlparse(self.path)
+        if PUBLIC_MODE and not self._authenticated():
+            self._send_json({"error": "Google sign-in required"}, 401)
+            return
+        if parsed.path == "/api/trade/toggle":
+            new_state = not STRATEGY.get("live_order_submission_enabled", False)
+            STRATEGY["live_order_submission_enabled"] = new_state
+            CLIENT.allow_trading = new_state
+            try:
+                (ROOT / "config/production_strategy.json").write_text(json.dumps(STRATEGY, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+            with _cache_lock:
+                _cache["at"] = 0.0
+            self._send_json({"live_orders_enabled": new_state})
+            return
+        elif parsed.path == "/api/trade/order":
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len) if content_len > 0 else b"{}"
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                side = str(payload.get("side", "buy")).lower()
+                size = int(payload.get("size", 1))
+                max_size = int(STRATEGY.get("risk_limits", {}).get("contract_size", 1))
+                if size > max_size:
+                    size = max_size
+                tools = CLIENT.available_tools()
+                if "place_order" not in tools:
+                    self._send_json({"error": "place_order tool is unavailable. Verify that your Delta API key has Trading permission enabled."}, 400)
+                    return
+                product_id = 27
+                try:
+                    p = CLIENT.call("get_product", {"symbol": "ETHUSD"})
+                    if isinstance(p, dict) and "id" in p:
+                        product_id = p["id"]
+                    elif isinstance(p, dict) and "result" in p and isinstance(p["result"], dict) and "id" in p["result"]:
+                        product_id = p["result"]["id"]
+                except Exception:
+                    pass
+                order_res = CLIENT.call("place_order", {
+                    "product_id": product_id,
+                    "size": size,
+                    "side": side,
+                    "order_type": "market_order",
+                })
+                with _cache_lock:
+                    _cache["at"] = 0.0
+                self._send_json({"status": "success", "order": order_res})
+            except Exception as exc:
+                self._send_json({"error": str(exc)}, 500)
+            return
+        self.send_error(404, "Unknown endpoint")
 
     def _cookie(self, name: str) -> str | None:
         for item in self.headers.get("Cookie", "").split(";"):

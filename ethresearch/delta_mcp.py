@@ -21,6 +21,10 @@ READ_TOOLS = frozenset({
     "get_open_orders",
 })
 
+TRADE_TOOLS = frozenset({
+    "place_order", "cancel_order", "batch_place_orders", "close_all_positions",
+})
+
 
 class DeltaMcpError(RuntimeError):
     pass
@@ -49,11 +53,12 @@ def unpack_tool_result(result: dict[str, Any]) -> Any:
 
 class DeltaMcpClient:
     def __init__(self, environment: str = "india_prod", timeout: float = 25.0,
-                 command: tuple[str, ...] | None = None):
+                 command: tuple[str, ...] | None = None, allow_trading: bool = False):
         if environment not in {"india_prod", "india_testnet"}:
             raise ValueError("Unsupported Delta MCP environment")
         self.environment = environment
         self.timeout = timeout
+        self.allow_trading = allow_trading
         self.command = command or (("delta-exchange-mcp",) if shutil.which("delta-exchange-mcp")
                                    else ("uvx", "delta-exchange-mcp==0.7.0"))
         self._lock = threading.RLock()
@@ -133,12 +138,13 @@ class DeltaMcpClient:
             return result
 
     def call(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
-        if name not in READ_TOOLS:
+        allowed = READ_TOOLS | (TRADE_TOOLS if self.allow_trading else frozenset())
+        if name not in allowed:
             raise DeltaMcpError(f"Tool {name} is not allowed by the read-only dashboard")
         with self._lock:
             self._start()
             if name not in self._tools:
-                raise DeltaMcpError(f"Delta MCP tool {name} is unavailable; connect a Read Data key")
+                raise DeltaMcpError(f"Delta MCP tool {name} is unavailable; verify your Delta API key permissions")
             return unpack_tool_result(self._exchange("tools/call", {
                 "name": name, "arguments": arguments or {},
             }))
