@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: eth-delta-account-dashboard
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DASHBOARD_PUBLIC
+        value: "1"
+      - key: GOOGLE_ALLOWED_EMAIL
+        value: logeslogesh.n554@gmail.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: DASHBOARD_SESSION_SECRET
+        generateValue: true
+      - key: DELTA_MCP_ENV
+        value: india_prod
+      - key: DELTA_API_KEY
+        sync: false
+      - key: DELTA_API_SECRET
+        sync: false

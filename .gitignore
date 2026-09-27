@@ -1,0 +1,12 @@
+.deps/
+__pycache__/
+.pytest_cache/
+data/immutable/
+*.pkl
+*.env
+**/*.env
+config.env
+_deps_backup/
+reports/
+data/
+.delta-exchange-mcp/

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Delta Account · ETH Research</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">Δ</span>
+        <div><strong>Delta Account</strong><small>ETH research workspace</small></div>
+      </div>
+      <div class="top-actions">
+        <span id="environment" class="env-pill">INDIA PRODUCTION</span>
+        <span id="connection" class="connection disconnected">Checking connection…</span>
+        <button id="refresh" type="button">Refresh</button>
+        <a id="sign-out" href="/auth/logout" hidden>Sign out</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro">
+        <div>
+          <p class="eyebrow">LIVE ACCOUNT VIEW · READ ONLY</p>
+          <h1>Balances, positions, and P&amp;L</h1>
+          <p id="as-of" class="muted">Waiting for Delta MCP…</p>
+        </div>
+        <div class="market-chip"><span>ETHUSD</span><strong id="eth-price">—</strong><small id="market-note">Delta market data</small></div>
+      </section>
+
+      <div id="notice" class="notice" role="status">Connecting to the local Delta MCP server…</div>
+
+      <section class="metrics" aria-label="Account overview">
+        <article class="metric"><span>Wallet balance</span><strong id="balance">—</strong><small id="balance-note">By asset below</small></article>
+        <article class="metric"><span>Available balance</span><strong id="available">—</strong><small id="available-note">By asset below</small></article>
+        <article class="metric"><span>Realized P&amp;L</span><strong id="realized">—</strong><small>Current open positions · by settlement asset</small></article>
+        <article class="metric"><span>Unrealized P&amp;L</span><strong id="unrealized">—</strong><small>Current open positions · by settlement asset</small></article>
+      </section>
+
+      <section class="section-card">
+        <div class="section-head"><div><p class="eyebrow">ACCOUNT</p><h2>Wallet balances</h2></div><span id="wallet-count" class="count">—</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Asset</th><th>Balance</th><th>Available</th><th>Position margin</th><th>Order margin</th><th>Strategy blocked</th></tr></thead><tbody id="wallet-rows"><tr><td colspan="6" class="empty">Waiting for account data</td></tr></tbody></table></div>
+      </section>
+
+      <section class="section-card">
+        <div class="section-head"><div><p class="eyebrow">RISK</p><h2>Open positions</h2></div><span id="position-count" class="count">—</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Product</th><th>Size</th><th>Entry</th><th>Mark</th><th>Liquidation</th><th>Margin</th><th>Realized P&amp;L</th><th>Unrealized P&amp;L</th><th>Funding</th></tr></thead><tbody id="position-rows"><tr><td colspan="9" class="empty">Waiting for account data</td></tr></tbody></table></div>
+      </section>
+
+      <div class="split">
+        <section class="section-card">
+          <div class="section-head"><div><p class="eyebrow">EXECUTIONS · LAST 30 DAYS</p><h2>Recent fills</h2></div><span id="fill-count" class="count">—</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Time</th><th>Product</th><th>Side</th><th>Size</th><th>Price</th><th>Fee</th><th>Settlement asset</th></tr></thead><tbody id="fill-rows"><tr><td colspan="7" class="empty">Waiting for account data</td></tr></tbody></table></div>
+          <p id="fills-note" class="footnote">Most recent 100 fills; more pages may exist.</p>
+        </section>
+        <section class="section-card">
+          <div class="section-head"><div><p class="eyebrow">WALLET LEDGER · LAST 30 DAYS</p><h2>Recent transactions</h2></div><span id="transaction-count" class="count">—</span></div>
+          <div class="table-wrap"><table><thead><tr><th>Time</th><th>Asset</th><th>Type</th><th>Amount</th><th>Balance after</th></tr></thead><tbody id="transaction-rows"><tr><td colspan="5" class="empty">Waiting for account data</td></tr></tbody></table></div>
+          <p id="transactions-note" class="footnote">Cashflow, funding, fees, deposits and withdrawals are kept separate.</p>
+        </section>
+      </div>
+
+      <section class="section-card">
+        <div class="section-head"><div><p class="eyebrow">EXCHANGE</p><h2>Open orders</h2></div><span id="order-count" class="count">—</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Product</th><th>Side</th><th>Type</th><th>Size</th><th>Limit / stop</th><th>State</th><th>Order ID</th></tr></thead><tbody id="order-rows"><tr><td colspan="7" class="empty">Waiting for account data</td></tr></tbody></table></div>
+      </section>
+
+      <section class="strategy-bar"><div><p class="eyebrow">RESEARCH STRATEGY</p><strong id="strategy-name">EXP_021_023</strong><span id="strategy-reason">Validation status loading…</span></div><span id="strategy-state" class="blocked-pill">BLOCKED</span></section>
+      <section class="section-card trade-controls">
+        <div class="section-head"><div><p class="eyebrow">LIVE TRADING CONTROLS</p><h2>Order execution</h2></div><button id="live-switch" type="button" disabled>OFF · BLOCKED</button></div>
+        <p class="control-note">The strategy has not passed validation. These INR limits are displayed for review and cannot place orders.</p>
+        <div class="limit-grid">
+          <label>Maximum trades per day<input id="max-trades" type="text" value="Not set" disabled></label>
+          <label>Daily net profit target · INR<input id="profit-target" type="text" value="Not set" disabled></label>
+          <label>Daily maximum loss · INR<input id="daily-loss" type="text" value="Not set" disabled></label>
+          <label>Per-trade stop loss · INR<input id="stop-loss" type="text" value="Not set" disabled></label>
+          <label>Per-trade take profit · INR<input id="take-profit" type="text" value="Not set" disabled></label>
+        </div>
+      </section>
+    </main>
+    <footer>Read-only Delta MCP account view · Live order execution blocked · Values retain Delta’s asset units</footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,12 @@
+**
+!Dockerfile
+!serve_dashboard.py
+!ethresearch/
+!ethresearch/__init__.py
+!ethresearch/delta_mcp.py
+!config/
+!config/production_strategy.json
+!web/
+!web/index.html
+!web/app.js
+!web/styles.css
