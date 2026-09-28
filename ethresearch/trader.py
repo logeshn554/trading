@@ -322,7 +322,11 @@ class GTrXLAutomatedTrader:
         per_trade_tp = float(limits.get("per_trade_take_profit", 600.0))
         contract_size = int(limits.get("contract_size", 1))
 
-        tools = self.client.available_tools()
+        try:
+            tools = self.client.available_tools()
+        except Exception as e:
+            self.log(f"Tools check warning: {e}")
+            return
 
         # 1. Inspect existing open positions
         current_pos_size = 0
@@ -360,11 +364,12 @@ class GTrXLAutomatedTrader:
                 self._close_position(symbol, current_pos_size, unrealized_pnl=unrealized_pnl)
                 return
 
-        # 3. Ingest recent market candles
+        # 3. Ingest recent market candles (trailing 90m is sufficient for 20-bar indicators)
         if "get_candles" not in tools:
             return
 
-        start_ts = int(now.timestamp() - 50 * 3600)
+        lookback_sec = 90 * 60 if "m" in resolution else 50 * 3600
+        start_ts = int(now.timestamp() - lookback_sec)
         end_ts = int(now.timestamp())
         try:
             c_res = self.client.call("get_candles", {

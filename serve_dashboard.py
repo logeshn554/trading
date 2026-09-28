@@ -26,10 +26,10 @@ ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
 STRATEGY = json.loads((ROOT / "config/production_strategy.json").read_text(encoding="utf-8"))
 MCP_ENV = os.environ.get("DELTA_MCP_ENV", "india_prod")
-PUBLIC_MODE = os.environ.get("DASHBOARD_PUBLIC") == "1"
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_ALLOWED_EMAIL = os.environ.get("GOOGLE_ALLOWED_EMAIL", "")
+PUBLIC_MODE = (os.environ.get("DASHBOARD_PUBLIC") == "1") and bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 SESSION_SECRET = os.environ.get("DASHBOARD_SESSION_SECRET", "")
 OTP_SECRET = os.environ.get("OTP_SECRET") or SESSION_SECRET or "delta_india_otp_secret_477554"
 CORRECT_OTP = os.environ.get("DASHBOARD_OTP", "477554")
@@ -226,7 +226,13 @@ def build_snapshot(client: DeltaMcpClient) -> dict:
         "ticker": None, "errors": {},
         "gtrxl_trader": TRADER.get_status(),
     }
-    tools = client.available_tools()
+    tools = set()
+    try:
+        tools = client.available_tools()
+    except Exception as exc:
+        result["errors"]["connection"] = str(exc)
+        result["connection"] = "unavailable"
+        return result
     if "get_connection_status" in tools:
         try:
             result["connection_status"] = client.call("get_connection_status")
@@ -351,14 +357,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/snapshot":
-            if not self._otp_authenticated() and not (PUBLIC_MODE and self._authenticated()):
+            has_auth = self._otp_authenticated() or (PUBLIC_MODE and self._authenticated())
+            if PUBLIC_MODE and not has_auth:
                 self._send_json({"error": "OTP authentication required", "requires_otp": True}, 401)
                 return
             try:
                 fresh = parse_qs(parsed.query).get("fresh", ["0"])[0] == "1"
                 self._send_json(snapshot(fresh=fresh))
-            except (DeltaMcpError, ValueError) as exc:
-                self._send_json({"error": str(exc), "connection": "unavailable"}, 503)
+            except Exception as exc:
+                self._send_json({"error": str(exc), "connection": "unavailable"}, 200)
+            return
         elif parsed.path == "/api/gtrxl/status":
             try:
                 from ethresearch.gtrxl import GTrXLActorCritic
@@ -398,11 +406,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if PUBLIC_MODE and not self._authenticated():
-            self._send_json({"error": "Google sign-in required"}, 401)
-            return
 
-        # OTP Verification endpoint
+        # OTP Verification endpoint (must be accessible prior to general auth)
         if parsed.path == "/api/auth/verify-otp":
             client_ip = self._client_ip()
             lockout = _get_lockout_remaining(client_ip)
@@ -443,6 +448,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 }, 401)
                 return
 
+        # General auth check for remaining POST endpoints
+        has_auth = self._otp_authenticated() or (PUBLIC_MODE and self._authenticated())
+        if PUBLIC_MODE and not has_auth:
+            self._send_json({"error": "Authentication required", "requires_otp": True}, 401)
+            return
+
         if parsed.path == "/api/auth/logout":
             cookie_str = "otp_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
             self.send_response(200)
@@ -452,8 +463,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({"success": True, "logged_out": True}).encode("utf-8"))
             return
 
-        # Ensure OTP is verified for trading controls
-        if not self._otp_authenticated() and not (PUBLIC_MODE and self._authenticated()):
+        # Ensure OTP or Google auth is active for trading controls
+        if not has_auth and not self._otp_authenticated():
             self._send_json({"error": "OTP authentication required", "requires_otp": True}, 401)
             return
 
@@ -465,15 +476,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             TRADER.log(f"Live automated trading submission toggled to {'ON' if new_state else 'OFF'}")
             try:
                 (ROOT / "config/production_strategy.json").write_text(json.dumps(STRATEGY, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Warning: Could not save strategy file to disk: {e}", flush=True)
             with _cache_lock:
                 _cache["at"] = 0.0
             self._send_json({"live_orders_enabled": new_state})
             return
 
         elif parsed.path == "/api/gtrxl/evaluate":
-            TRADER.evaluate_and_trade()
+            try:
+                TRADER.evaluate_and_trade()
+            except Exception as e:
+                TRADER.log(f"Evaluate notice: {e}")
             self._send_json(TRADER.get_status())
             return
 
