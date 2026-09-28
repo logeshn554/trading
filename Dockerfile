@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=10000 \
     HOST=0.0.0.0
 
-RUN python -m pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu torch==2.2.2+cpu scikit-learn numpy delta-exchange-mcp==0.7.0 google-auth==2.40.3 requests==2.32.5 \
+RUN python -m pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu "numpy<2" torch==2.2.2+cpu scikit-learn delta-exchange-mcp==0.7.0 google-auth==2.40.3 requests==2.32.5 \
     && command -v delta-exchange-mcp \
     && useradd --create-home --uid 10001 dashboard
 
