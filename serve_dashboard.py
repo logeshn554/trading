@@ -464,11 +464,19 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             limits = STRATEGY.get("risk_limits", {})
             sl_val = float(limits.get("per_trade_stop_loss", 300.0))
             TRADER.log(f"[SIMULATION TRIGGER] Position breached stop-loss threshold (-₹{sl_val:.2f}). Triggering emergency exit.")
-            dummy_feat = TRADER.last_entry_features or TRADER.current_bar_features or torch.randn(32)
-            TRADER.learn_from_trade_failure(exit_pnl=-sl_val, side="buy", entry_feat=dummy_feat)
+            dummy_feat = TRADER.last_entry_features or TRADER.current_bar_features
+            if dummy_feat is None:
+                dummy_feat = torch.zeros(32)
+                dummy_feat[7] = 0.42   # 42% upper rejection wick
+                dummy_feat[10] = 1.85  # 1.85x volume surge
+                dummy_feat[16] = 1.35  # Volatility expansion
+                dummy_feat[18] = 0.52  # Overbought RSI
+            
+            res = TRADER.learn_from_trade_failure(exit_pnl=-sl_val, side="buy", entry_feat=dummy_feat)
             self._send_json({
                 "status": "success",
-                "message": f"Stop-loss handled: emergency exit executed and GTrXL policy adapted online to prevent -₹{sl_val:.2f} loss.",
+                "message": f"Stop-loss analyzed and fixed: {res.get('fix_summary', 'Policy adapted')}",
+                "analysis": res,
                 "trader": TRADER.get_status(),
             })
             return

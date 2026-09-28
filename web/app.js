@@ -674,6 +674,20 @@ function renderGTrXL(trader) {
     tradesCountEl.textContent = `Trades today: ${trader.trades_today || 0}`;
   }
 
+  const rcaBox = byId('gtrxl-rca-box');
+  const rcaBadge = byId('rca-reason-badge');
+  const rcaDesc = byId('rca-explanation');
+  const rcaFixDesc = byId('rca-fix-desc');
+
+  if (trader.last_failure_analysis && rcaBox) {
+    rcaBox.style.display = 'block';
+    if (rcaBadge) rcaBadge.textContent = trader.last_failure_analysis.reason_code || 'DIAGNOSED';
+    if (rcaDesc) rcaDesc.textContent = trader.last_failure_analysis.explanation || '';
+    if (rcaFixDesc && trader.last_failure_fix) {
+      rcaFixDesc.textContent = trader.last_failure_fix.fix_summary || 'Applied policy gradient penalty & updated weights.';
+    }
+  }
+
   if (logsEl && Array.isArray(trader.recent_logs) && trader.recent_logs.length > 0) {
     logsEl.replaceChildren();
     for (const logLine of trader.recent_logs) {
@@ -716,7 +730,11 @@ if (testSlBtn) {
       if (res.ok) {
         const body = await res.json();
         if (body.trader) renderGTrXL(body.trader);
-        setNotice(`✅ Stop-loss event triggered & autonomously healed: ${body.message}`, 'ok');
+        if (body.analysis && body.analysis.reason_code) {
+          setNotice(`🛡️ [${body.analysis.reason_code}] ${body.analysis.fix_summary}`, 'ok');
+        } else {
+          setNotice(`✅ Stop-loss event triggered & autonomously healed: ${body.message}`, 'ok');
+        }
       }
     } catch (e) {
       console.error('Stop loss test failed', e);

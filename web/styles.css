@@ -652,4 +652,57 @@
   .gtrxl-metrics-grid { grid-template-columns: 1fr; }
 }
 
+/* Autonomous Failure Root Cause Analysis Banner */
+.gtrxl-rca-banner {
+  margin: 0 21px 16px;
+  background: rgba(35, 18, 25, 0.7);
+  border: 1px solid #7a2b38;
+  border-left: 4px solid #ff526a;
+  border-radius: 8px;
+  padding: 12px 16px;
+  animation: fadeIn 0.3s ease-in-out;
+}
+.rca-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.rca-tag {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  font-weight: 800;
+  color: #ff8597;
+  text-transform: uppercase;
+}
+.rca-badge {
+  background: #4a1822;
+  color: #ff9fb0;
+  border: 1px solid #8e2b3c;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: monospace;
+}
+.rca-desc {
+  font-size: 13px;
+  color: #fce8eb;
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+.rca-fix-row {
+  font-size: 12px;
+  color: #a8dfc8;
+  background: rgba(14, 40, 30, 0.6);
+  border: 1px solid #1f6044;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.rca-fix-row strong {
+  color: #4dd5a3;
+  margin-right: 6px;
+}
+
+
 

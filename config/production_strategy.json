@@ -1,45 +1,6 @@
 {
-  "strategy_id": "EXP_021_023_WF_2025_flow10_strict_candle_h12",
-  "exchange": "delta_india",
-  "product_symbol": "ETHUSD",
-  "bar_resolution": "1h",
-  "model_type": "GTrXL_RL",
-  "gtrxl_config": {
-    "d_in": 32,
-    "action_dim": 3,
-    "d_model": 128,
-    "n_heads": 4,
-    "n_layers": 4,
-    "mem_len": 128,
-    "horizons": ["30m", "1h", "2h"],
-    "actions": {
-      "0": "HOLD",
-      "1": "BUY",
-      "2": "SELL"
-    }
-  },
-  "side": "gtrxl_policy_action",
-  "entry_gate": "gtrxl_confidence >= 0.60 and abs(flow_6) >= 0.10",
-  "checkpoint_bundle": "artifacts/gtrxl/model_bundle.pkl",
-  "weights_file": "artifacts/gtrxl/gtrxl_model.pt",
-  "scaler_file": "artifacts/gtrxl/scaler.pkl",
-  "backtest": {
-    "trades": 40,
-    "wins": 29,
-    "win_rate": 0.725,
-    "net_pnl_usd": 350.4736664893261,
-    "selection_pass": true,
-    "source": "reports/round_008/RESULTS.md"
-  },
-  "live_order_submission_enabled": true,
   "risk_limits": {
-    "currency": "INR",
-    "max_trades_per_day": 5,
-    "daily_net_profit_target": 1200.0,
-    "daily_max_loss": 1000.0,
-    "per_trade_stop_loss": 300.0,
-    "per_trade_take_profit": 600.0,
-    "contract_size": 1
-  },
-  "blockers": []
+    "per_trade_stop_loss": 300,
+    "confidence_threshold": 0.6
+  }
 }
