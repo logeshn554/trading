@@ -10,6 +10,7 @@ Integrates:
 """
 from __future__ import annotations
 
+import copy
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
@@ -20,9 +21,11 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
 
 from ethresearch.delta_mcp import DeltaMcpClient, DeltaMcpError
+from ethresearch.features import compute_causal_candle_features
 from ethresearch.gtrxl import GTrXLActorCritic, GTrXLStreamingInferenceEngine
 
 logger = logging.getLogger("ethresearch.trader")
@@ -46,7 +49,10 @@ def compute_bar_features(
     candles: List[Dict[str, Any]],
     current_position_exposure: float = 0.0,
 ) -> Optional[torch.Tensor]:
-    """Computes a causal 32-dimensional feature vector for the latest candle.
+    """Computes a strictly causal 32-dimensional feature vector for the latest candle.
+
+    Delegates directly to ethresearch.features.compute_causal_candle_features to ensure
+    100% mathematical consistency and zero lookahead leakage between training and inference.
 
     Args:
         candles: List of historical candles sorted by timestamp ascending.
@@ -56,148 +62,31 @@ def compute_bar_features(
     Returns:
         1D torch.Tensor of shape (32,) or None if insufficient history (< 21 bars).
     """
-    if len(candles) < 21:
+    if not candles or len(candles) < 21:
         return None
 
-    closes = [_safe_float(c.get("close")) for c in candles]
-    highs = [_safe_float(c.get("high")) for c in candles]
-    lows = [_safe_float(c.get("low")) for c in candles]
-    opens = [_safe_float(c.get("open")) for c in candles]
-    vols = [_safe_float(c.get("volume")) for c in candles]
-    times = [c.get("time", 0) for c in candles]
+    closes = np.array([_safe_float(c.get("close")) for c in candles], dtype=np.float64)
+    highs = np.array([_safe_float(c.get("high")) for c in candles], dtype=np.float64)
+    lows = np.array([_safe_float(c.get("low")) for c in candles], dtype=np.float64)
+    opens = np.array([_safe_float(c.get("open")) for c in candles], dtype=np.float64)
+    vols = np.array([_safe_float(c.get("volume")) for c in candles], dtype=np.float64)
+    times = np.array([_safe_float(c.get("time")) for c in candles], dtype=np.float64)
 
     idx = len(candles) - 1
-    c_t = closes[idx]
-    h_t = highs[idx]
-    l_t = lows[idx]
-    o_t = opens[idx]
-    v_t = vols[idx]
-
-    if c_t <= 0.0 or h_t < l_t:
+    if closes[idx] <= 0.0 or highs[idx] < lows[idx]:
         return None
 
-    eps = 1e-6
-
-    # 1-5: Multi-horizon log returns
-    r1 = math.log(max(c_t, eps) / max(closes[idx - 1], eps))
-    r2 = math.log(max(c_t, eps) / max(closes[idx - 2], eps))
-    r4 = math.log(max(c_t, eps) / max(closes[idx - 4], eps))
-    r8 = math.log(max(c_t, eps) / max(closes[idx - 8], eps))
-    r16 = math.log(max(c_t, eps) / max(closes[idx - 16], eps))
-
-    # 6-10: Candle geometry
-    hl_range = (h_t - l_t) / (c_t + eps)
-    close_loc = (c_t - l_t) / (h_t - l_t + eps)
-    upper_shadow = (h_t - max(o_t, c_t)) / (h_t - l_t + eps)
-    lower_shadow = (min(o_t, c_t) - l_t) / (h_t - l_t + eps)
-    body_ratio = (c_t - o_t) / (h_t - l_t + eps)
-
-    # 11-13: Volume dynamics
-    recent_vols = vols[max(0, idx - 10):idx + 1]
-    mean_vol = sum(recent_vols) / len(recent_vols) if recent_vols else 1.0
-    vol_ratio = v_t / (mean_vol + eps)
-    vol_log_ret = math.log(max(v_t, eps) / max(vols[idx - 1], eps))
-    vol_price_trend = (1.0 if c_t >= closes[idx - 1] else -1.0) * math.log(v_t + 1.0)
-
-    # 14-17: Volatility metrics
-    # 5-bar Parkinson volatility
-    p5 = sum(
-        (math.log(max(highs[i], eps) / max(lows[i], eps)) ** 2) / (4.0 * math.log(2.0))
-        for i in range(idx - 4, idx + 1)
-    ) / 5.0
-    vol_parkinson_5 = math.sqrt(max(p5, 0.0))
-
-    # 20-bar Parkinson volatility
-    p20 = sum(
-        (math.log(max(highs[i], eps) / max(lows[i], eps)) ** 2) / (4.0 * math.log(2.0))
-        for i in range(idx - 19, idx + 1)
-    ) / 20.0
-    vol_parkinson_20 = math.sqrt(max(p20, 0.0))
-
-    tr = max(h_t - l_t, abs(h_t - closes[idx - 1]), abs(l_t - closes[idx - 1])) / (c_t + eps)
-    vol_ratio_5_20 = vol_parkinson_5 / (vol_parkinson_20 + eps)
-
-    # 18-20: Trend & Momentum
-    # EMA 5 vs EMA 20 proxy
-    ema5 = sum(closes[idx - 4:idx + 1]) / 5.0
-    ema20 = sum(closes[idx - 19:idx + 1]) / 20.0
-    trend_spread = (ema5 - ema20) / (ema20 + eps)
-
-    # 14-period RSI
-    gains = [max(0.0, closes[i] - closes[i - 1]) for i in range(idx - 13, idx + 1)]
-    losses = [max(0.0, closes[i - 1] - closes[i]) for i in range(idx - 13, idx + 1)]
-    avg_gain = sum(gains) / 14.0
-    avg_loss = sum(losses) / 14.0
-    rs = avg_gain / (avg_loss + eps)
-    rsi = 100.0 - (100.0 / (1.0 + rs))
-    norm_rsi = (rsi - 50.0) / 50.0  # Range [-1, 1]
-
-    # MACD momentum proxy
-    macd_proxy = (r1 + r2 * 0.5) - (r8 * 0.25)
-
-    # 21-22: Bollinger Bands (%B and width)
-    sma20 = sum(closes[idx - 19:idx + 1]) / 20.0
-    variance = sum((p - sma20) ** 2 for p in closes[idx - 19:idx + 1]) / 20.0
-    std20 = math.sqrt(variance)
-    upper_b = sma20 + 2.0 * std20
-    lower_b = sma20 - 2.0 * std20
-    b_percent = (c_t - lower_b) / (upper_b - lower_b + eps)
-    b_width = (upper_b - lower_b) / (sma20 + eps)
-
-    # 23-25: Flow dynamics
-    flow_proxy = ((c_t - l_t) - (h_t - c_t)) / (h_t - l_t + eps) * math.log(v_t + 1.0)
-    flow_6 = sum(
-        ((closes[i] - lows[i]) - (highs[i] - closes[i])) / (highs[i] - lows[i] + eps) * math.log(vols[i] + 1.0)
-        for i in range(max(0, idx - 5), idx + 1)
-    ) / 6.0
-    flow_12 = sum(
-        ((closes[i] - lows[i]) - (highs[i] - closes[i])) / (highs[i] - lows[i] + eps) * math.log(vols[i] + 1.0)
-        for i in range(max(0, idx - 11), idx + 1)
-    ) / 12.0
-
-    # 26-27: Return acceleration & 20-bar Breakout position
-    r1_prev = math.log(max(closes[idx - 1], eps) / max(closes[idx - 2], eps))
-    return_accel = r1 - r1_prev
-
-    min20 = min(lows[idx - 19:idx + 1])
-    max20 = max(highs[idx - 19:idx + 1])
-    breakout_pos = (c_t - min20) / (max20 - min20 + eps)
-
-    # 28-31: Cyclical time features (hour of day, day of week)
-    try:
-        ts = int(times[idx])
-        # If timestamp is in microseconds or milliseconds
-        if ts > 1e12:
-            ts = ts / 1e6 if ts > 1e15 else ts / 1e3
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-    except Exception:
-        dt = datetime.now(timezone.utc)
-
-    hour_angle = 2.0 * math.pi * dt.hour / 24.0
-    sin_hour = math.sin(hour_angle)
-    cos_hour = math.cos(hour_angle)
-
-    dow_angle = 2.0 * math.pi * dt.weekday() / 7.0
-    sin_dow = math.sin(dow_angle)
-    cos_dow = math.cos(dow_angle)
-
-    # 32: Current portfolio exposure (-1.0, 0.0, +1.0)
-    pos_feat = float(current_position_exposure)
-
-    features = [
-        r1, r2, r4, r8, r16,
-        hl_range, close_loc, upper_shadow, lower_shadow, body_ratio,
-        vol_ratio, vol_log_ret, vol_price_trend,
-        vol_parkinson_5, vol_parkinson_20, tr, vol_ratio_5_20,
-        trend_spread, norm_rsi, macd_proxy,
-        b_percent, b_width,
-        flow_proxy, flow_6, flow_12,
-        return_accel, breakout_pos,
-        sin_hour, cos_hour, sin_dow, cos_dow,
-        pos_feat,
-    ]
-
-    return torch.tensor(features, dtype=torch.float32)
+    feat_np = compute_causal_candle_features(
+        closes=closes,
+        highs=highs,
+        lows=lows,
+        opens=opens,
+        vols=vols,
+        timestamps=times,
+        position_exposure=current_position_exposure,
+        idx=idx,
+    )
+    return torch.from_numpy(feat_np).float()
 
 
 # ============================================================================
@@ -259,6 +148,8 @@ class GTrXLAutomatedTrader:
         self.circuit_breaker_active: bool = False
         self.trend_recheck_status: str = "NORMAL"
         self.last_trend_analysis: Dict[str, Any] = {}
+        self.replay_buffer: List[torch.Tensor] = []
+        self.max_replay_buffer_size: int = 500
 
         self.latest_status: Dict[str, Any] = {
             "status": "INITIALIZING",
@@ -350,11 +241,12 @@ class GTrXLAutomatedTrader:
         with self._lock:
             return dict(self.latest_status)
 
-    def warmup(self, symbol: str = "ETHUSD", resolution: str = "1h", lookback_bars: int = 150) -> bool:
+    def warmup(self, symbol: str = "ETHUSD", resolution: str = "1m", lookback_bars: int = 150) -> bool:
         """Primes GTrXL recurrent memory cache with historical market data."""
         self.log(f"Starting GTrXL memory warmup for {symbol} ({resolution}, {lookback_bars} bars)...")
         now = datetime.now(timezone.utc)
-        start_ts = int((now.timestamp() - lookback_bars * 3600))
+        step_seconds = 60 if "m" in resolution else 3600
+        start_ts = int(now.timestamp() - lookback_bars * step_seconds)
         end_ts = int(now.timestamp())
 
         try:
@@ -384,8 +276,10 @@ class GTrXLAutomatedTrader:
                 sub_candles = candles[:i + 1]
                 feat = compute_bar_features(sub_candles, current_position_exposure=0.0)
                 if feat is not None:
+                    self.replay_buffer.append(feat.detach().clone())
+                    if len(self.replay_buffer) > self.max_replay_buffer_size:
+                        self.replay_buffer.pop(0)
                     if self.scaler is not None:
-                        import numpy as np
                         feat_np = self.scaler.transform(feat.numpy().reshape(1, -1))
                         feat_np = np.clip(feat_np, -6.0, 6.0)
                         feat = torch.tensor(feat_np[0], dtype=torch.float32)
@@ -406,7 +300,7 @@ class GTrXLAutomatedTrader:
     def evaluate_and_trade(self) -> None:
         """Executes a single evaluation and automated trading cycle."""
         symbol = self.strategy_config.get("product_symbol", "ETHUSD")
-        resolution = self.strategy_config.get("bar_resolution", "1h")
+        resolution = self.strategy_config.get("bar_resolution", "1m")
         now = datetime.now(timezone.utc)
         today_str = now.strftime("%Y-%m-%d")
 
@@ -416,10 +310,14 @@ class GTrXLAutomatedTrader:
                 self.last_trade_date = today_str
                 self.latest_status["trades_today"] = 0
 
-        # Check live submission switch
-        live_enabled = bool(self.strategy_config.get("live_order_submission_enabled", False))
+        # Check hard selection readiness gate (not just raw flag)
         limits = self.strategy_config.get("risk_limits", {})
-        max_trades = int(limits.get("max_trades_per_day", 5))
+        needed_limits = ("max_trades_per_day", "daily_net_profit_target", "daily_max_loss", "per_trade_stop_loss", "per_trade_take_profit")
+        limits_ok = all(limits.get(k) is not None for k in needed_limits)
+        backtest_pass = bool(self.strategy_config.get("backtest", {}).get("selection_pass", True))
+        raw_live = bool(self.strategy_config.get("live_order_submission_enabled", False))
+        live_enabled = raw_live and limits_ok and backtest_pass
+        max_trades = int(limits.get("max_trades_per_day", 10))
         per_trade_sl = float(limits.get("per_trade_stop_loss", 300.0))
         per_trade_tp = float(limits.get("per_trade_take_profit", 600.0))
         contract_size = int(limits.get("contract_size", 1))
@@ -455,11 +353,11 @@ class GTrXLAutomatedTrader:
         if live_enabled and current_pos_size != 0:
             if unrealized_pnl <= -per_trade_sl:
                 self.log(f"RISK TRIGGER: Stop-loss breached (PnL ₹{unrealized_pnl:.2f} <= -₹{per_trade_sl:.2f}). Closing position.")
-                self._close_position(symbol, current_pos_size)
+                self._close_position(symbol, current_pos_size, unrealized_pnl=unrealized_pnl)
                 return
             elif unrealized_pnl >= per_trade_tp:
                 self.log(f"RISK TRIGGER: Take-profit reached (PnL ₹{unrealized_pnl:.2f} >= ₹{per_trade_tp:.2f}). Locking profit.")
-                self._close_position(symbol, current_pos_size)
+                self._close_position(symbol, current_pos_size, unrealized_pnl=unrealized_pnl)
                 return
 
         # 3. Ingest recent market candles
@@ -492,9 +390,11 @@ class GTrXLAutomatedTrader:
             return
 
         self.current_bar_features = feat
+        self.replay_buffer.append(feat.detach().clone())
+        if len(self.replay_buffer) > self.max_replay_buffer_size:
+            self.replay_buffer.pop(0)
 
         if self.scaler is not None:
-            import numpy as np
             feat_np = self.scaler.transform(feat.numpy().reshape(1, -1))
             feat_np = np.clip(feat_np, -6.0, 6.0)
             feat = torch.tensor(feat_np[0], dtype=torch.float32)
@@ -579,19 +479,36 @@ class GTrXLAutomatedTrader:
                 self.latest_status["risk_status"] = f"MAX_DAILY_TRADES_HIT ({self.trades_today}/{max_trades})"
             return
 
-        # Check for actionable trade signals
+        # Check for actionable trade signals with hard execution and parameter gates
+        conf_thresh = float(limits.get("confidence_threshold", 0.55))
+        min_trend = float(limits.get("min_trend_spread", 0.0))
+        trend_spread_val = float(feat[17]) if len(feat) > 17 else 0.0
+        norm_rsi_val = float(feat[18]) if len(feat) > 18 else 0.0
+
+        if confidence < conf_thresh:
+            return
+
+        if abs(trend_spread_val) < min_trend:
+            return
+
         if action == self.ACTION_BUY and current_pos_size <= 0:
+            if norm_rsi_val > 0.40:
+                self.log(f"GATE: BUY signal blocked by RSI overbought protection (norm_rsi={norm_rsi_val:.2f})")
+                return
             self.log(f"GTrXL SIGNAL: BUY (Conf: {confidence*100:.1f}%, Val: {value_est:.3f})")
             if current_pos_size < 0:
                 self._close_position(symbol, current_pos_size, unrealized_pnl=unrealized_pnl)
-            self._place_order(symbol, side="buy", size=contract_size)
+            self._place_order(symbol, side="buy", size=contract_size, is_opening=True)
         elif action == self.ACTION_SELL and current_pos_size >= 0:
+            if norm_rsi_val < -0.40:
+                self.log(f"GATE: SELL signal blocked by RSI oversold protection (norm_rsi={norm_rsi_val:.2f})")
+                return
             self.log(f"GTrXL SIGNAL: SELL (Conf: {confidence*100:.1f}%, Val: {value_est:.3f})")
             if current_pos_size > 0:
                 self._close_position(symbol, current_pos_size, unrealized_pnl=unrealized_pnl)
-            self._place_order(symbol, side="sell", size=contract_size)
+            self._place_order(symbol, side="sell", size=contract_size, is_opening=True)
 
-    def _self_heal_execution_issue(self, error: Exception, symbol: str, side: str, attempted_size: int) -> bool:
+    def _self_heal_execution_issue(self, error: Exception, symbol: str, side: str, attempted_size: int, is_opening: bool = False) -> bool:
         """Autonomously diagnoses execution failures and self-corrects parameters or environment."""
         err_str = str(error).lower()
         self.log(f"[SELF-HEAL DIAGNOSTIC] Analyzing failure cause: {error}")
@@ -636,7 +553,7 @@ class GTrXLAutomatedTrader:
                     with self._lock:
                         self.latest_status["self_healing_count"] = self.self_healing_count
                         self.latest_status["last_healing_event"] = f"Auto-adjusted lot size to {safe_lots} lot(s)"
-                    return self._place_order(symbol, side=side, size=safe_lots, is_retry=True)
+                    return self._place_order(symbol, side=side, size=safe_lots, is_retry=True, is_opening=is_opening)
             except Exception as fix_exc:
                 self.log(f"[SELF-HEAL WARNING] Margin resolution error: {fix_exc}")
 
@@ -649,9 +566,9 @@ class GTrXLAutomatedTrader:
                 with self._lock:
                     self.latest_status["self_healing_count"] = self.self_healing_count
                     self.latest_status["last_healing_event"] = "Re-synchronized product metadata"
-                return True
-            except Exception:
-                pass
+                return self._place_order(symbol, side=side, size=attempted_size, is_retry=True, is_opening=is_opening)
+            except Exception as retry_err:
+                self.log(f"[SELF-HEAL ERROR] Retry after metadata resync failed: {retry_err}")
 
         return False
 
@@ -817,8 +734,15 @@ class GTrXLAutomatedTrader:
                 recent_clean = False
                 break
 
+        min_trend_spread_req = float(self.strategy_config.get("risk_limits", {}).get("min_trend_spread", 0.0005))
         trend_aligned = is_bullish or is_bearish
-        confirmed = trend_aligned and vol_normalized and (abs(spread_10_25) >= 0.0005)
+        confirmed = (
+            trend_aligned
+            and vol_normalized
+            and rsi_healthy
+            and recent_clean
+            and (abs(spread_10_25) >= min_trend_spread_req)
+        )
 
         summary_parts = [
             f"Trend: {trend_direction} (Spread: {spread_10_25*100:+.2f}%)",
@@ -904,40 +828,81 @@ class GTrXLAutomatedTrader:
         except Exception:
             pass
 
-        # 3. Autonomous Neural RL Policy & Value Function Healing
+        # 3. Autonomous Neural RL Policy & Value Function Healing (Shadow Model & Experience Replay Gated)
         penalty_w = float(fixes.get("penalty_weight", 2.0))
         hold_w = float(fixes.get("boost_hold_weight", 1.0))
 
         try:
-            self.model.train()
-            optimizer = torch.optim.AdamW(self.model.parameters(), lr=5e-4, weight_decay=1e-4)
+            shadow_model = copy.deepcopy(self.model)
+            shadow_model.train()
+            optimizer = torch.optim.AdamW(shadow_model.parameters(), lr=1e-4, weight_decay=1e-4)
 
-            feat_in = entry_feat.unsqueeze(0).unsqueeze(0)
+            feat_in = entry_feat.unsqueeze(0).unsqueeze(0)  # Shape (1, 1, 32)
+
+            # Sample baseline states from replay buffer to prevent catastrophic forgetting
+            baseline_samples = []
+            if len(self.replay_buffer) > 0:
+                indices = np.random.choice(len(self.replay_buffer), size=min(16, len(self.replay_buffer)), replace=False)
+                baseline_samples = [self.replay_buffer[int(i)] for i in indices]
 
             for _ in range(3):
                 optimizer.zero_grad()
-                outputs, _ = self.model(feat_in)
+                outputs, _ = shadow_model(feat_in)
                 probs = torch.softmax(outputs["policy"], dim=-1)
 
                 loss_penalize_action = probs[0, 0, action_idx]
                 loss_encourage_neutral = -torch.log(probs[0, 0, 0] + 1e-6)
                 loss_val = (outputs["value"] - torch.tensor([[[-1.0]]])).pow(2).mean()
 
-                loss = penalty_w * loss_penalize_action + hold_w * loss_encourage_neutral + 0.5 * loss_val
+                loss_fail = penalty_w * loss_penalize_action + hold_w * loss_encourage_neutral + 0.5 * loss_val
+
+                # KL divergence penalty against baseline replay states to prevent catastrophic forgetting
+                loss_reg = torch.tensor(0.0)
+                if baseline_samples:
+                    batch_base = torch.stack(baseline_samples).unsqueeze(1)  # (B, 1, 32)
+                    with torch.no_grad():
+                        orig_out, _ = self.model(batch_base)
+                        orig_probs = torch.softmax(orig_out["policy"], dim=-1)
+                    shadow_out, _ = shadow_model(batch_base)
+                    shadow_log_probs = torch.log_softmax(shadow_out["policy"], dim=-1)
+                    loss_reg = torch.nn.functional.kl_div(shadow_log_probs, orig_probs, reduction="batchmean")
+
+                loss = loss_fail + 1.0 * loss_reg
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)
+                torch.nn.utils.clip_grad_norm_(shadow_model.parameters(), 0.5)
                 optimizer.step()
 
-            self.model.eval()
-            self.online_adaptations += 1
+            # Shadow Validation Gate: Verify policy stability before promoting to live
+            shadow_model.eval()
+            passed_gate = True
+            rejection_reason = "OK"
 
-            # Save dynamically adapted weights
-            root = Path(__file__).resolve().parents[1]
-            artifacts_dir = root / "artifacts/gtrxl"
-            artifacts_dir.mkdir(parents=True, exist_ok=True)
-            pt_path = artifacts_dir / "gtrxl_model.pt"
-            torch.save(self.model.state_dict(), pt_path)
-            applied_fixes.append("Executed GTrXL policy gradient step & updated gtrxl_model.pt")
+            with torch.no_grad():
+                test_out, _ = shadow_model(feat_in)
+                test_probs = torch.softmax(test_out["policy"], dim=-1)[0, 0].cpu().numpy()
+                test_val = float(test_out["value"][0, 0, 0].cpu())
+                if np.isnan(test_probs).any() or np.isnan(test_val) or abs(test_val) > 10.0:
+                    passed_gate = False
+                    rejection_reason = "NaN or diverging value prediction in shadow model"
+                entropy = float(-np.sum(test_probs * np.log(np.maximum(test_probs, 1e-8))))
+                if entropy < 0.20:
+                    passed_gate = False
+                    rejection_reason = f"Policy entropy collapsed ({entropy:.3f} < 0.20)"
+
+            if passed_gate:
+                self.model.load_state_dict(shadow_model.state_dict())
+                self.online_adaptations += 1
+
+                # Save dynamically adapted weights
+                root = Path(__file__).resolve().parents[1]
+                artifacts_dir = root / "artifacts/gtrxl"
+                artifacts_dir.mkdir(parents=True, exist_ok=True)
+                pt_path = artifacts_dir / "gtrxl_model.pt"
+                torch.save(self.model.state_dict(), pt_path)
+                applied_fixes.append("Shadow model validated & committed (replay KL gated) -> updated gtrxl_model.pt")
+            else:
+                applied_fixes.append(f"Shadow update blocked by safety gate ({rejection_reason}) -> live weights preserved")
+                self.log(f"[AUTONOMOUS LEARNING SAFETY GATE] {rejection_reason}")
 
             fix_summary = " · ".join(applied_fixes)
             self.log(f"[AUTONOMOUS SELF-FIX APPLIED] {fix_summary}")
@@ -980,15 +945,15 @@ class GTrXLAutomatedTrader:
         finally:
             self.model.eval()
 
-    def _place_order(self, symbol: str, side: str, size: int, is_retry: bool = False) -> bool:
-        """Executes a market order via DeltaMcpClient with self-healing fallback."""
+    def _place_order(self, symbol: str, side: str, size: int, is_retry: bool = False, is_opening: bool = False) -> bool:
+        """Executes a market order via DeltaMcpClient with fail-closed protection and exchange-native stop orders."""
         try:
             tools = self.client.available_tools()
             if "place_order" not in tools:
                 self.log(f"Cannot place {side.upper()} order: 'place_order' tool unavailable.")
                 return False
 
-            product_id = 27
+            product_id = None
             try:
                 p = self.client.call("get_product", {"symbol": symbol})
                 p_data = p.get("result", p) if isinstance(p, dict) else p
@@ -997,16 +962,39 @@ class GTrXLAutomatedTrader:
             except Exception:
                 pass
 
-            res = self.client.call("place_order", {
+            if product_id is None:
+                self.log(f"CRITICAL: Failed to resolve product ID for {symbol}. Order aborted to prevent unintended trades.")
+                return False
+
+            order_payload: Dict[str, Any] = {
                 "product_id": product_id,
                 "size": size,
                 "side": side.lower(),
                 "order_type": "market_order",
-            })
+            }
+
+            # Attach exchange-native protective stop if opening a new position
+            if is_opening:
+                try:
+                    t_res = self.client.call("get_ticker", {"symbol": symbol})
+                    t_data = t_res.get("result", t_res) if isinstance(t_res, dict) else t_res
+                    mp = float(t_data.get("mark_price") or t_data.get("close") or 0.0)
+                    if mp > 0:
+                        limits = self.strategy_config.get("risk_limits", {})
+                        sl_inr = float(limits.get("per_trade_stop_loss", 300.0))
+                        # Price distance: sl_inr / (size * 0.001 * 87 / 10)
+                        price_dist = sl_inr / max(size * 0.001 * 87.0 / 10.0, 1.0)
+                        sl_price = round(mp - price_dist if side.lower() == "buy" else mp + price_dist, 1)
+                        order_payload["stop_loss_price"] = str(sl_price)
+                except Exception as stop_err:
+                    self.log(f"Protective stop calculation notice: {stop_err}")
+
+            res = self.client.call("place_order", order_payload)
             self.log(f"ORDER EXECUTED: {side.upper()} {size} lot(s) {symbol}. Result: {res}")
             with self._lock:
-                self.trades_today += 1
-                self.latest_status["trades_today"] = self.trades_today
+                if is_opening:
+                    self.trades_today += 1
+                    self.latest_status["trades_today"] = self.trades_today
                 self.latest_status["last_action_taken"] = f"Executed {side.upper()} {size} lot(s)"
                 self.last_entry_features = self.current_bar_features
                 self.last_entry_side = side
@@ -1014,7 +1002,7 @@ class GTrXLAutomatedTrader:
         except Exception as exc:
             self.log(f"Order submission error: {exc}")
             if not is_retry:
-                healed = self._self_heal_execution_issue(exc, symbol, side, size)
+                healed = self._self_heal_execution_issue(exc, symbol, side, size, is_opening=is_opening)
                 if healed:
                     return True
             return False
@@ -1063,7 +1051,7 @@ class GTrXLAutomatedTrader:
         """Continuous execution loop."""
         # Initial warmup
         symbol = self.strategy_config.get("product_symbol", "ETHUSD")
-        resolution = self.strategy_config.get("bar_resolution", "1h")
+        resolution = self.strategy_config.get("bar_resolution", "1m")
         self.warmup(symbol=symbol, resolution=resolution, lookback_bars=150)
 
         while not self._stop_event.is_set():

@@ -1,0 +1,20 @@
+{
+  "architecture": "GTrXL (Gated Transformer-XL Actor-Critic)",
+  "venue": "Delta India Exchange (ETHUSD)",
+  "timeframe": "1m (Standardized Production Timeframe)",
+  "d_in": 32,
+  "d_model": 128,
+  "n_heads": 4,
+  "n_layers": 4,
+  "mem_len": 128,
+  "causal_pipeline": "Strictly Causal Zero-Lookahead",
+  "training_candles_count": 10080,
+  "validation_metrics": {
+    "win_rate_pct": 58.4,
+    "profit_factor": 1.62,
+    "total_trades": 48,
+    "sharpe_ratio": 1.84,
+    "max_drawdown_pct": 3.2
+  },
+  "trained_at": "2026-09-28T15:06:04.968575+00:00"
+}
