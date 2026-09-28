@@ -249,5 +249,94 @@ class TestTraderRiskAndCircuitBreaker(unittest.TestCase):
             self.assertTrue(torch.isfinite(p).all())
 
 
+class TestPaperTradingSystem(unittest.TestCase):
+    """Verifies continuous $10 paper trading engine, fee deduction, full lot sizing, and liquidation at zero."""
+
+    def setUp(self):
+        from ethresearch.paper import PaperTradingAccount
+        from pathlib import Path
+        import tempfile
+        self.tmp_file = Path(tempfile.gettempdir()) / "test_paper_state.json"
+        if self.tmp_file.exists():
+            self.tmp_file.unlink()
+        self.paper = PaperTradingAccount(initial_capital=10.0, state_file=self.tmp_file)
+
+    def tearDown(self):
+        if self.tmp_file.exists():
+            try:
+                self.tmp_file.unlink()
+            except Exception:
+                pass
+
+    def test_initial_paper_state(self):
+        """Account starts with exactly $10.00 USD, flat position, and active status."""
+        summary = self.paper.get_summary()
+        self.assertEqual(summary["initial_capital"], 10.0)
+        self.assertEqual(summary["cash_balance"], 10.0)
+        self.assertEqual(summary["equity"], 10.0)
+        self.assertEqual(summary["current_position"], 0)
+        self.assertEqual(summary["total_fees_paid"], 0.0)
+        self.assertFalse(summary["is_exhausted"])
+        self.assertTrue(summary["enabled"])
+
+    def test_full_lot_sizing(self):
+        """Full lot sizing calculates contracts to commit 100% of available $10 margin."""
+        price = 2500.0
+        contracts = self.paper.calculate_full_lot_size(price)
+        self.assertGreater(contracts, 0)
+        # Margin per contract = 2500 * 0.001 / 5 = $0.50
+        # For $10 capital, contracts should be ~19-20 contracts
+        self.assertGreaterEqual(contracts, 15)
+
+    def test_buy_execution_deducts_fees(self):
+        """Executing a BUY signal fills full lot and deducts Delta 0.05% taker fee."""
+        fill = self.paper.execute_signal(1, price=2600.0, confidence=0.75)
+        self.assertIsNotNone(fill)
+        self.assertGreater(fill["contracts"], 0)
+        self.assertGreater(self.paper.total_fees_paid, 0.0)
+        self.assertLess(self.paper.cash_balance, 10.0)
+        self.assertEqual(self.paper.current_position, fill["contracts"])
+
+    def test_round_trip_trade_accounting(self):
+        """Opening and closing trade reflects net P&L with entry and exit fees."""
+        self.paper.execute_signal(1, price=2500.0, confidence=0.8)
+        initial_fee = self.paper.total_fees_paid
+        # Price rises to 2600 (profitable trade)
+        close_fill = self.paper.close_position(price=2600.0, reason="TAKE_PROFIT")
+        self.assertIsNotNone(close_fill)
+        self.assertEqual(self.paper.current_position, 0)
+        self.assertGreater(self.paper.total_fees_paid, initial_fee)
+        self.assertGreater(close_fill["net_pnl"], 0.0)
+        self.assertGreater(self.paper.cash_balance, 10.0)
+        self.assertEqual(self.paper.total_trades, 1)
+        self.assertEqual(self.paper.winning_trades, 1)
+
+    def test_liquidation_until_zero(self):
+        """Runs continuously until adverse loss exhausts capital to $0.00."""
+        self.paper.execute_signal(1, price=2600.0, confidence=0.8)
+        # Severe crash from 2600 to 2000
+        is_liq, reason = self.paper.update_mark_price(price=2000.0)
+        self.assertTrue(is_liq)
+        self.assertEqual(reason, "LIQUIDATION")
+        self.assertTrue(self.paper.is_exhausted)
+        self.assertEqual(self.paper.cash_balance, 0.0)
+        self.assertEqual(self.paper.equity, 0.0)
+        self.assertEqual(self.paper.current_position, 0)
+
+        # Subsequent signals are rejected when exhausted
+        next_fill = self.paper.execute_signal(1, price=2000.0, confidence=0.9)
+        self.assertIsNone(next_fill)
+
+    def test_reset_after_exhaustion(self):
+        """Reset returns account cleanly back to $10.00 USD."""
+        self.paper.is_exhausted = True
+        self.paper.cash_balance = 0.0
+        self.paper.reset(10.0)
+        self.assertFalse(self.paper.is_exhausted)
+        self.assertEqual(self.paper.cash_balance, 10.0)
+        self.assertEqual(self.paper.equity, 10.0)
+
+
 if __name__ == "__main__":
     unittest.main()
+

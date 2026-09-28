@@ -225,6 +225,7 @@ def build_snapshot(client: DeltaMcpClient) -> dict:
         "realized_pnl_open_positions": {}, "unrealized_pnl_open_positions": {},
         "ticker": None, "errors": {},
         "gtrxl_trader": TRADER.get_status(),
+        "paper_trading": TRADER.paper_account.get_summary() if hasattr(TRADER, "paper_account") else {},
     }
     tools = set()
     try:
@@ -393,6 +394,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         elif parsed.path == "/api/gtrxl/signal":
             self._send_json(TRADER.get_status())
             return
+        elif parsed.path == "/api/paper/status":
+            self._send_json(TRADER.paper_account.get_summary() if hasattr(TRADER, "paper_account") else {})
+            return
         elif parsed.path == "/api/my-ip":
             self._send_json({"outbound_ip": get_outbound_ip()})
         elif parsed.path == "/favicon.ico":
@@ -489,6 +493,38 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 TRADER.log(f"Evaluate notice: {e}")
             self._send_json(TRADER.get_status())
+            return
+
+        elif parsed.path == "/api/paper/reset":
+            summary = TRADER.reset_paper_trading(10.0)
+            with _cache_lock:
+                _cache["at"] = 0.0
+            self._send_json({"status": "ok", "paper_trading": summary})
+            return
+
+        elif parsed.path == "/api/paper/toggle":
+            summary = TRADER.toggle_paper_trading()
+            with _cache_lock:
+                _cache["at"] = 0.0
+            self._send_json({"status": "ok", "paper_trading": summary})
+            return
+
+        elif parsed.path == "/api/delta/credentials":
+            length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(length)) if length > 0 else {}
+            api_key = str(payload.get("api_key", "")).strip()
+            api_secret = str(payload.get("api_secret", "")).strip()
+            grant = "trade" if STRATEGY.get("live_order_submission_enabled") else "read"
+            if not api_key or not api_secret:
+                self._send_json({"error": "Both api_key and api_secret are required"}, 400)
+                return
+            try:
+                saved = CLIENT.save_credentials(api_key, api_secret, grant=grant)
+                with _cache_lock:
+                    _cache["at"] = 0.0
+                self._send_json({"status": "ok", "saved": saved, "tools": list(CLIENT.available_tools())})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
             return
 
         elif parsed.path == "/api/gtrxl/simulate-stop-loss":

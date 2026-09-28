@@ -607,6 +607,10 @@ function render(data) {
   if (data.gtrxl_trader) {
     renderGTrXL(data.gtrxl_trader);
   }
+  const paperData = data.paper_trading || data.gtrxl_trader?.paper_trading;
+  if (paperData) {
+    renderPaperTrading(paperData, data.ticker);
+  }
 }
 
 function renderGTrXL(trader) {
@@ -723,6 +727,118 @@ function renderGTrXL(trader) {
     logsEl.scrollTop = logsEl.scrollHeight;
   }
 }
+
+function renderPaperTrading(paper, ticker) {
+  if (!paper) return;
+  const equityEl = byId('paper-equity');
+  const balEl = byId('paper-balance');
+  const posEl = byId('paper-position');
+  const posSubEl = byId('paper-position-sub');
+  const unEl = byId('paper-unrealized');
+  const reEl = byId('paper-realized');
+  const feesEl = byId('paper-fees');
+  const markEl = byId('paper-mark-price');
+  const winEl = byId('paper-winrate');
+  const pillEl = byId('paper-status-pill');
+  const toggleBtn = byId('paper-toggle-btn');
+  const bannerEl = byId('paper-exhausted-banner');
+  const reasonEl = byId('paper-exhausted-reason');
+  const countEl = byId('paper-trade-count');
+  const rowsEl = byId('paper-exec-rows');
+
+  const eq = Number(paper.equity) || 0;
+  const bal = Number(paper.cash_balance) || 0;
+  const un = Number(paper.unrealized_pnl) || 0;
+  const re = Number(paper.realized_pnl) || 0;
+  const fees = Number(paper.total_fees_paid) || 0;
+
+  if (equityEl) {
+    equityEl.textContent = `$${eq.toFixed(2)}`;
+    equityEl.className = eq >= 10 ? 'positive' : (eq > 0 ? 'warning-text' : 'negative');
+  }
+  if (balEl) balEl.textContent = `$${bal.toFixed(2)}`;
+  if (posEl) {
+    posEl.textContent = paper.position_desc || 'FLAT';
+    posEl.className = paper.current_position > 0 ? 'positive' : (paper.current_position < 0 ? 'negative' : '');
+  }
+  if (posSubEl) {
+    if (paper.current_position !== 0 && paper.entry_price) {
+      posSubEl.textContent = `Entry: $${Number(paper.entry_price).toFixed(2)}`;
+    } else {
+      posSubEl.textContent = '100% Capital Deployment';
+    }
+  }
+  if (unEl) {
+    unEl.textContent = `${un >= 0 ? '+' : ''}$${un.toFixed(4)}`;
+    unEl.className = un >= 0 ? 'positive' : 'negative';
+  }
+  if (reEl) {
+    reEl.textContent = `${re >= 0 ? '+' : ''}$${re.toFixed(4)}`;
+    reEl.className = re >= 0 ? 'positive' : 'negative';
+  }
+  if (feesEl) feesEl.textContent = `-$${fees.toFixed(4)}`;
+
+  const tickObj = ticker?.result || ticker || {};
+  const currentMark = Number(tickObj.mark_price || tickObj.close || paper.current_price || 0);
+  if (markEl) markEl.textContent = currentMark > 0 ? `Delta Mark: $${currentMark.toFixed(2)}` : 'Delta ETH Mark';
+  if (winEl) winEl.textContent = `Win Rate: ${paper.win_rate || 0}% (${paper.total_trades || 0} trades)`;
+
+  if (pillEl) {
+    if (paper.is_exhausted) {
+      pillEl.textContent = 'EXHAUSTED ($0.00)';
+      pillEl.className = 'blocked-pill';
+    } else if (!paper.enabled) {
+      pillEl.textContent = 'PAPER PAUSED';
+      pillEl.className = 'blocked-pill';
+    } else {
+      pillEl.textContent = 'PAPER ACTIVE (CONTINUOUS)';
+      pillEl.className = 'ready-pill';
+    }
+  }
+
+  if (toggleBtn) {
+    toggleBtn.textContent = paper.enabled ? '⏸️ Pause Paper Algo' : '▶️ Resume Paper Algo';
+  }
+
+  if (bannerEl) {
+    if (paper.is_exhausted) {
+      bannerEl.style.display = 'block';
+      if (reasonEl) reasonEl.textContent = paper.exhaustion_reason || 'Paper trading capital reached $0.00. Click Reset to re-seed with $10.00.';
+    } else {
+      bannerEl.style.display = 'none';
+    }
+  }
+
+  if (countEl) countEl.textContent = `${paper.total_trades || 0} trades`;
+
+  if (rowsEl) {
+    const list = Array.isArray(paper.recent_trades) ? paper.recent_trades : [];
+    if (!list.length) {
+      rowsEl.innerHTML = '<tr><td colspan="10" class="empty">Waiting for first algorithmic execution…</td></tr>';
+    } else {
+      rowsEl.replaceChildren();
+      for (const t of list) {
+        const tr = document.createElement('tr');
+        const netPnl = Number(t.net_pnl) || 0;
+        const pnlClass = netPnl > 0 ? 'positive' : (netPnl < 0 ? 'negative' : 'muted');
+        tr.innerHTML = `
+          <td>${t.timestamp ? time(t.timestamp) : '—'}</td>
+          <td><span class="badge ${t.type.includes('OPEN') ? 'badge-open' : 'badge-close'}">${t.type}</span></td>
+          <td><strong class="${t.side === 'BUY' ? 'positive' : 'negative'}">${t.side}</strong></td>
+          <td>${t.contracts}</td>
+          <td>$${Number(t.entry_price || 0).toFixed(2)}</td>
+          <td>${t.exit_price ? `$${Number(t.exit_price).toFixed(2)}` : '—'}</td>
+          <td class="negative">-$${Number(t.fee_paid || 0).toFixed(4)}</td>
+          <td class="${pnlClass}">${netPnl !== 0 ? (netPnl > 0 ? '+' : '') + `$${netPnl.toFixed(4)}` : '—'}</td>
+          <td><strong>$${Number(t.balance_after || 0).toFixed(2)}</strong></td>
+          <td><small class="muted">${t.reason || ''}</small></td>
+        `;
+        rowsEl.append(tr);
+      }
+    }
+  }
+}
+
 
 const evalBtn = byId('gtrxl-eval-btn');
 if (evalBtn) {
@@ -973,6 +1089,129 @@ if (saveLimitsBtn) {
   });
 }
 
+// Paper Trading Reset & Toggle Listeners
+async function resetPaperCapital() {
+  const resetBtns = [byId('paper-reset-btn'), byId('paper-exhausted-reset-btn')];
+  resetBtns.forEach(b => { if (b) { b.disabled = true; b.textContent = 'Resetting…'; } });
+  try {
+    const res = await fetch('/api/paper/reset', {method: 'POST'});
+    if (res.ok) {
+      const body = await res.json();
+      if (body.paper_trading) {
+        renderPaperTrading(body.paper_trading, latestData?.ticker);
+        setNotice('✅ Paper trading pool reset to $10.00 USD. Continuous algorithm active.', 'ok');
+      }
+      refresh(true);
+    } else {
+      setNotice('Failed to reset paper trading balance.', 'error');
+    }
+  } catch (err) {
+    setNotice(`Paper reset error: ${err.message}`, 'error');
+  } finally {
+    const btn1 = byId('paper-reset-btn');
+    if (btn1) { btn1.disabled = false; btn1.textContent = '🔄 Reset to $10.00'; }
+    const btn2 = byId('paper-exhausted-reset-btn');
+    if (btn2) { btn2.disabled = false; btn2.textContent = '🔄 Reset Balance to $10.00 & Restart Algo'; }
+  }
+}
+
+const paperResetBtn = byId('paper-reset-btn');
+if (paperResetBtn) paperResetBtn.addEventListener('click', resetPaperCapital);
+
+const paperExhaustedResetBtn = byId('paper-exhausted-reset-btn');
+if (paperExhaustedResetBtn) paperExhaustedResetBtn.addEventListener('click', resetPaperCapital);
+
+const paperToggleBtn = byId('paper-toggle-btn');
+if (paperToggleBtn) {
+  paperToggleBtn.addEventListener('click', async () => {
+    paperToggleBtn.disabled = true;
+    try {
+      const res = await fetch('/api/paper/toggle', {method: 'POST'});
+      if (res.ok) {
+        const body = await res.json();
+        if (body.paper_trading) {
+          renderPaperTrading(body.paper_trading, latestData?.ticker);
+          const stateTxt = body.paper_trading.enabled ? 'active' : 'paused';
+          setNotice(`Paper trading algorithmic execution ${stateTxt}.`, 'ok');
+        }
+        refresh(true);
+      }
+    } catch (err) {
+      setNotice(`Paper toggle error: ${err.message}`, 'error');
+    } finally {
+      paperToggleBtn.disabled = false;
+    }
+  });
+}
+
+// Delta Credentials Modal Listeners
+const connectDeltaBtn = byId('connect-delta-btn');
+const credsModal = byId('creds-modal');
+const credsCancelBtn = byId('creds-cancel-btn');
+const credsForm = byId('creds-form');
+const credsAlert = byId('creds-alert');
+
+if (connectDeltaBtn && credsModal) {
+  connectDeltaBtn.addEventListener('click', () => {
+    credsModal.classList.remove('hidden');
+    if (credsAlert) credsAlert.classList.add('hidden');
+  });
+}
+
+if (credsCancelBtn && credsModal) {
+  credsCancelBtn.addEventListener('click', () => {
+    credsModal.classList.add('hidden');
+  });
+}
+
+if (credsForm) {
+  credsForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const apiKey = byId('delta-api-key-input')?.value.trim();
+    const apiSecret = byId('delta-api-secret-input')?.value.trim();
+    const saveBtn = byId('creds-save-btn');
+    if (!apiKey || !apiSecret) {
+      if (credsAlert) {
+        credsAlert.textContent = 'Both API Key and Secret are required.';
+        credsAlert.classList.remove('hidden');
+      }
+      return;
+    }
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Connecting to Delta…';
+    }
+    try {
+      const res = await fetch('/api/delta/credentials', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({api_key: apiKey, api_secret: apiSecret}),
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        if (credsModal) credsModal.classList.add('hidden');
+        setNotice('✅ Delta API credentials saved and synchronized into Delta MCP session!', 'ok');
+        refresh(true);
+      } else {
+        if (credsAlert) {
+          credsAlert.textContent = data.error || 'Failed to connect Delta API credentials.';
+          credsAlert.classList.remove('hidden');
+        }
+      }
+    } catch (err) {
+      if (credsAlert) {
+        credsAlert.textContent = `Error: ${err.message}`;
+        credsAlert.classList.remove('hidden');
+      }
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save & Connect Delta';
+      }
+    }
+  });
+}
+
 // Initial checks & poll loops
 checkOtpStatus().then(authed => {
   if (authed) {
@@ -991,3 +1230,4 @@ setInterval(() => {
     refresh();
   }
 }, 30000);
+

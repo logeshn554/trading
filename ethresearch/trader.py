@@ -27,8 +27,10 @@ import torch
 from ethresearch.delta_mcp import DeltaMcpClient, DeltaMcpError
 from ethresearch.features import compute_causal_candle_features
 from ethresearch.gtrxl import GTrXLActorCritic, GTrXLStreamingInferenceEngine
+from ethresearch.paper import PaperTradingAccount
 
 logger = logging.getLogger("ethresearch.trader")
+
 
 
 # ============================================================================
@@ -185,6 +187,9 @@ class GTrXLAutomatedTrader:
             "recent_logs": [],
         }
 
+        # Continuous Paper Trading Engine ($10 Initial Capital Pool)
+        self.paper_account = PaperTradingAccount(initial_capital=10.0)
+
         # Load trained weights and scaler if available
         self.scaler = None
         self._load_trained_artifacts()
@@ -239,7 +244,31 @@ class GTrXLAutomatedTrader:
 
     def get_status(self) -> Dict[str, Any]:
         with self._lock:
-            return dict(self.latest_status)
+            status = dict(self.latest_status)
+            if self.paper_account is not None:
+                status["paper_trading"] = self.paper_account.get_summary()
+            return status
+
+    def reset_paper_trading(self, initial_capital: float = 10.0) -> Dict[str, Any]:
+        with self._lock:
+            if self.paper_account is not None:
+                self.paper_account.reset(initial_capital)
+                self.log(f"[PAPER TRADING] Reset paper trading capital back to ${initial_capital:.2f}")
+                return self.paper_account.get_summary()
+            return {}
+
+    def toggle_paper_trading(self, enabled: Optional[bool] = None) -> Dict[str, Any]:
+        with self._lock:
+            if self.paper_account is not None:
+                if enabled is None:
+                    self.paper_account.enabled = not self.paper_account.enabled
+                else:
+                    self.paper_account.enabled = bool(enabled)
+                self.paper_account.save_state()
+                self.log(f"[PAPER TRADING] Paper trading set to {'ENABLED' if self.paper_account.enabled else 'PAUSED'}")
+                return self.paper_account.get_summary()
+            return {}
+
 
     def warmup(self, symbol: str = "ETHUSD", resolution: str = "1m", lookback_bars: int = 150) -> bool:
         """Primes GTrXL recurrent memory cache with historical market data."""
@@ -430,6 +459,53 @@ class GTrXLAutomatedTrader:
                 "trades_today": self.trades_today,
                 "risk_status": "OK" if live_enabled else "LIVE_TRADING_PAUSED",
             })
+
+        # 4b. Continuous Paper Trading Execution ($10 Capital Pool)
+        c_close = _safe_float(latest_candle.get("close"), 0.0)
+        c_high = _safe_float(latest_candle.get("high"), c_close)
+        c_low = _safe_float(latest_candle.get("low"), c_close)
+        norm_rsi_val = float(feat[18]) if len(feat) > 18 else 0.0
+        conf_thresh = float(limits.get("confidence_threshold", 0.50))
+
+        if self.paper_account is not None and c_close > 0.0:
+            is_liq, liq_reason = self.paper_account.update_mark_price(c_close, high=c_high, low=c_low)
+            if is_liq:
+                self.log(f"[PAPER TRADING] Liquidation: {liq_reason}. Balance is $0.00.")
+            elif self.paper_account.enabled and not self.paper_account.is_exhausted:
+                # Automated Risk Exits: Paper Stop-loss ($0.50) & Take-profit ($1.00)
+                sl_dollars = 0.50
+                tp_dollars = 1.00
+                if self.paper_account.current_position != 0:
+                    if self.paper_account.unrealized_pnl <= -sl_dollars:
+                        closed_fill = self.paper_account.close_position(c_close, reason="PAPER_STOP_LOSS")
+                        if closed_fill:
+                            self.log(f"[PAPER SL HIT] Closed position at stop-loss (Net PnL: ${closed_fill.get('net_pnl'):+.4f}).")
+                            self.consecutive_stop_losses += 1
+                            if self.last_entry_features is not None and self.last_entry_side is not None:
+                                r_code, r_expl, r_fixes = self._diagnose_failure_reason(self.last_entry_side, self.last_entry_features)
+                                self._adapt_policy_from_failure(self.last_entry_features, self.last_entry_side, r_code, r_fixes)
+                    elif self.paper_account.unrealized_pnl >= tp_dollars:
+                        closed_fill = self.paper_account.close_position(c_close, reason="PAPER_TAKE_PROFIT")
+                        if closed_fill:
+                            self.log(f"[PAPER TP HIT] Closed position at take-profit (Net PnL: ${closed_fill.get('net_pnl'):+.4f}).")
+
+                # If eligible, execute algorithmic signal allocating full available $10 lot with fees
+                if not self.paper_account.is_exhausted and confidence >= conf_thresh:
+                    if action == self.ACTION_BUY and self.paper_account.current_position <= 0:
+                        if norm_rsi_val <= 0.40:
+                            fill = self.paper_account.execute_signal(1, c_close, confidence=confidence)
+                            if fill:
+                                self.last_entry_features = feat.detach().clone()
+                                self.last_entry_side = "BUY"
+                                self.log(f"[PAPER ALGO EXECUTION] FULL $10 LOT BUY {fill.get('contracts')} lot(s) @ ${fill.get('entry_price')} (Fee: ${fill.get('fee_paid'):.4f}) | Balance: ${self.paper_account.cash_balance:.4f}")
+                    elif action == self.ACTION_SELL and self.paper_account.current_position >= 0:
+                        if norm_rsi_val >= -0.40:
+                            fill = self.paper_account.execute_signal(2, c_close, confidence=confidence)
+                            if fill:
+                                self.last_entry_features = feat.detach().clone()
+                                self.last_entry_side = "SELL"
+                                self.log(f"[PAPER ALGO EXECUTION] FULL $10 LOT SELL {fill.get('contracts')} lot(s) @ ${fill.get('entry_price')} (Fee: ${fill.get('fee_paid'):.4f}) | Balance: ${self.paper_account.cash_balance:.4f}")
+
 
         # 5. Circuit Breaker Check (2+ Consecutive Stop Losses)
         now_ts = time.time()

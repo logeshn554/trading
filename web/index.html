@@ -19,6 +19,7 @@
         <span id="environment" class="env-pill">INDIA PRODUCTION</span>
         <span id="server-ip" class="ip-pill">IP: Detecting…</span>
         <span id="connection" class="connection disconnected">Checking connection…</span>
+        <button id="connect-delta-btn" type="button" class="connect-delta-btn" title="Configure Delta Exchange API credentials">🔑 Delta API</button>
         <button id="refresh" type="button">Refresh</button>
         <button id="lock-btn" type="button" class="lock-btn" title="Lock session with PIN">🔒 Lock</button>
         <a id="sign-out" href="/auth/logout" hidden>Sign out</a>
@@ -44,6 +45,31 @@
             <button id="otp-submit-btn" type="submit" class="otp-submit-btn">Unlock Terminal</button>
           </form>
           <div class="otp-hint">Authorized access only · Protected with 30s security lockout on incorrect entry</div>
+        </div>
+      </div>
+
+      <!-- Delta Exchange API Credentials Modal -->
+      <div id="creds-modal" class="otp-modal-backdrop hidden">
+        <div class="otp-dialog creds-dialog">
+          <div class="otp-shield">🔑</div>
+          <h2>Connect Delta India API</h2>
+          <p class="otp-subtitle">Enter your Delta Exchange India API credentials to unlock wallet balances and live account status.</p>
+          <form id="creds-form" autocomplete="off">
+            <div class="creds-input-group">
+              <label for="delta-api-key-input">API Key</label>
+              <input type="text" id="delta-api-key-input" placeholder="Enter Delta API Key" required>
+            </div>
+            <div class="creds-input-group">
+              <label for="delta-api-secret-input">API Secret</label>
+              <input type="password" id="delta-api-secret-input" placeholder="Enter Delta API Secret" required>
+            </div>
+            <div id="creds-alert" class="otp-alert hidden"></div>
+            <div class="creds-btn-row">
+              <button id="creds-cancel-btn" type="button" class="creds-cancel-btn">Cancel</button>
+              <button id="creds-save-btn" type="submit" class="otp-submit-btn">Save &amp; Connect Delta</button>
+            </div>
+          </form>
+          <div class="otp-hint">Keys are sent directly to your server and stored securely in Delta MCP session.</div>
         </div>
       </div>
 
@@ -100,6 +126,94 @@
       <section class="section-card">
         <div class="section-head"><div><p class="eyebrow">EXCHANGE</p><h2>Open orders</h2></div><span id="order-count" class="count">—</span></div>
         <div class="table-wrap"><table><thead><tr><th>Product</th><th>Side</th><th>Type</th><th>Size</th><th>Limit / stop</th><th>State</th><th>Order ID</th></tr></thead><tbody id="order-rows"><tr><td colspan="7" class="empty">Waiting for account data</td></tr></tbody></table></div>
+      </section>
+
+      <!-- Continuous Paper Trading Engine ($10 Initial Capital Pool) -->
+      <section class="paper-card" id="paper-trading-section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">CONTINUOUS PAPER TRADING · FULL $10 LOT ALLOCATION</p>
+            <h2>GTrXL Autonomous Paper Trading ($10 Pool)</h2>
+          </div>
+          <div class="flex-center-gap">
+            <span id="paper-status-pill" class="ready-pill">PAPER TRADING ACTIVE</span>
+            <button id="paper-toggle-btn" type="button" class="paper-toggle-btn">⏸️ Pause Paper Algo</button>
+            <button id="paper-reset-btn" type="button" class="paper-reset-btn">🔄 Reset to $10.00</button>
+          </div>
+        </div>
+
+        <div class="paper-metrics-grid">
+          <div class="calc-card highlight-card">
+            <span class="calc-label">Total Paper Equity</span>
+            <strong id="paper-equity" class="positive">$10.00</strong>
+            <small class="muted" id="paper-equity-sub">Initial Capital: $10.00 USD</small>
+          </div>
+          <div class="calc-card">
+            <span class="calc-label">Cash Balance</span>
+            <strong id="paper-balance">$10.00</strong>
+            <small class="muted">Available for full lot margin</small>
+          </div>
+          <div class="calc-card">
+            <span class="calc-label">Active Position</span>
+            <strong id="paper-position">FLAT</strong>
+            <small class="muted" id="paper-position-sub">100% Capital Deployment</small>
+          </div>
+          <div class="calc-card">
+            <span class="calc-label">Unrealized P&amp;L</span>
+            <strong id="paper-unrealized">$0.00</strong>
+            <small class="muted" id="paper-mark-price">Delta ETH Mark: —</small>
+          </div>
+          <div class="calc-card">
+            <span class="calc-label">Realized P&amp;L</span>
+            <strong id="paper-realized">$0.00</strong>
+            <small class="muted" id="paper-winrate">Win Rate: 0% (0 trades)</small>
+          </div>
+          <div class="calc-card">
+            <span class="calc-label">Exchange Fees Paid</span>
+            <strong id="paper-fees" class="negative">$0.0000</strong>
+            <small class="muted">Delta Taker: 0.05% + Slippage</small>
+          </div>
+        </div>
+
+        <!-- Exhaustion / Zero Balance Banner -->
+        <div id="paper-exhausted-banner" class="paper-exhausted-banner" style="display: none;">
+          <div class="exhausted-header">
+            <span class="exhausted-tag">⚠️ PAPER CAPITAL FULLY EXHAUSTED ($0.00 REACHED)</span>
+            <button id="paper-exhausted-reset-btn" type="button" class="paper-reset-btn-large">🔄 Reset Balance to $10.00 &amp; Restart Algo</button>
+          </div>
+          <p id="paper-exhausted-reason" class="exhausted-desc">
+            Trading capital has been fully depleted to $0.00 through cumulative trading friction, exchange fees, and market volatility. Click Reset to re-seed and restart the algorithmic run.
+          </p>
+        </div>
+
+        <!-- Recent Paper Executions Table -->
+        <div class="paper-executions-wrap">
+          <div class="paper-exec-head">
+            <h3>Recent Algorithmic Paper Executions</h3>
+            <span id="paper-trade-count" class="count">0 trades</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Type</th>
+                  <th>Side</th>
+                  <th>Contracts</th>
+                  <th>Entry Price</th>
+                  <th>Exit Price</th>
+                  <th>Fee Paid</th>
+                  <th>Net P&amp;L</th>
+                  <th>Balance After</th>
+                  <th>Trigger Reason</th>
+                </tr>
+              </thead>
+              <tbody id="paper-exec-rows">
+                <tr><td colspan="10" class="empty">Waiting for first algorithmic execution…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <!-- GTrXL Autonomous AI Trading Engine Section -->

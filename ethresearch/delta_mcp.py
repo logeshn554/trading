@@ -18,7 +18,7 @@ READ_TOOLS = frozenset({
     "get_connection_status", "get_ticker", "get_recent_trades", "get_candles",
     "get_product", "get_wallet_balances",
     "get_margined_positions", "get_wallet_transactions", "get_fills",
-    "get_open_orders",
+    "get_open_orders", "save_credentials", "setup_credentials",
 })
 
 TRADE_TOOLS = frozenset({
@@ -67,13 +67,32 @@ class DeltaMcpClient:
         self._next_id = 0
         self._tools: set[str] = set()
 
+    def _sync_config_file(self) -> None:
+        api_key = os.environ.get("DELTA_API_KEY", "").strip()
+        api_secret = os.environ.get("DELTA_API_SECRET", "").strip()
+        if api_key and api_secret:
+            try:
+                from pathlib import Path
+                cfg_dir = Path.home() / ".delta-exchange-mcp"
+                cfg_dir.mkdir(parents=True, exist_ok=True)
+                cfg_file = cfg_dir / "config.env"
+                mode = "trade" if self.allow_trading else "read"
+                cfg_file.write_text(
+                    f"DELTA_API_KEY={api_key}\nDELTA_API_SECRET={api_secret}\nDELTA_MCP_ENV={self.environment}\nDELTA_MCP_MODE={mode}\n",
+                    encoding="utf-8"
+                )
+            except Exception:
+                pass
+
     def _start(self) -> None:
         if self._proc is not None and self._proc.poll() is None:
             return
         self._responses = queue.Queue()
         self._tools.clear()
+        self._sync_config_file()
         env = os.environ.copy()
         env["DELTA_MCP_ENV"] = self.environment
+        env["DELTA_MCP_MODE"] = "trade" if self.allow_trading else "read"
         try:
             self._proc = subprocess.Popen(
                 self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -93,6 +112,27 @@ class DeltaMcpClient:
         listed = self._exchange("tools/list", {})
         self._tools = {item.get("name") for item in listed.get("tools", [])
                        if isinstance(item, dict) and isinstance(item.get("name"), str)}
+
+        # Auto-authenticate if credentials are in environment
+        api_key = os.environ.get("DELTA_API_KEY", "").strip()
+        api_secret = os.environ.get("DELTA_API_SECRET", "").strip()
+        if "save_credentials" in self._tools and api_key and api_secret:
+            try:
+                grant = "trade" if self.allow_trading else "read"
+                self._exchange("tools/call", {
+                    "name": "save_credentials",
+                    "arguments": {
+                        "environment": self.environment,
+                        "api_key": api_key,
+                        "api_secret": api_secret,
+                        "grant": grant,
+                    }
+                })
+                relisted = self._exchange("tools/list", {})
+                self._tools = {item.get("name") for item in relisted.get("tools", [])
+                               if isinstance(item, dict) and isinstance(item.get("name"), str)}
+            except Exception:
+                pass
 
     @staticmethod
     def _read_stdout(proc: subprocess.Popen[str], responses: queue.Queue[dict[str, Any]]) -> None:
@@ -154,6 +194,32 @@ class DeltaMcpClient:
             self._start()
             return set(self._tools)
 
+    def save_credentials(self, api_key: str, api_secret: str, grant: str = "read") -> bool:
+        """Saves Delta API credentials into the MCP session and configuration file."""
+        with self._lock:
+            os.environ["DELTA_API_KEY"] = api_key.strip()
+            os.environ["DELTA_API_SECRET"] = api_secret.strip()
+            self._sync_config_file()
+            self._start()
+            if "save_credentials" in self._tools:
+                try:
+                    self._exchange("tools/call", {
+                        "name": "save_credentials",
+                        "arguments": {
+                            "environment": self.environment,
+                            "api_key": api_key.strip(),
+                            "api_secret": api_secret.strip(),
+                            "grant": grant,
+                        }
+                    })
+                    relisted = self._exchange("tools/list", {})
+                    self._tools = {item.get("name") for item in relisted.get("tools", [])
+                                   if isinstance(item, dict) and isinstance(item.get("name"), str)}
+                    return True
+                except Exception as exc:
+                    raise DeltaMcpError(f"Failed to save credentials in Delta MCP: {exc}") from exc
+            return False
+
     def close(self) -> None:
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
@@ -164,3 +230,4 @@ class DeltaMcpClient:
                     self._proc.kill()
             self._proc = None
             self._tools.clear()
+

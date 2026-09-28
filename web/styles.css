@@ -777,6 +777,193 @@
   margin-right: 6px;
 }
 
-
-
-
+/* Paper Trading Terminal Styles */
+.paper-card {
+  background: linear-gradient(180deg, #131b26 0%, #0d1219 100%);
+  border: 1px solid #1f3147;
+  border-radius: 12px;
+  margin-bottom: 24px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+.paper-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 16px 20px;
+}
+.highlight-card {
+  background: rgba(18, 52, 40, 0.4);
+  border: 1px solid #226b4f !important;
+}
+.paper-toggle-btn {
+  background: #1b2838;
+  border: 1px solid #2d4560;
+  color: #cfddec;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+}
+.paper-toggle-btn:hover {
+  background: #25394f;
+  color: #fff;
+}
+.paper-reset-btn {
+  background: linear-gradient(135deg, #184e77, #1e6091);
+  border: 1px solid #38a3a5;
+  color: #e0f2fe;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .2s;
+}
+.paper-reset-btn:hover {
+  background: #227093;
+  color: #fff;
+}
+.paper-reset-btn-large {
+  background: linear-gradient(135deg, #d90429, #9b2226);
+  border: 1px solid #ff4d6d;
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .2s;
+}
+.paper-reset-btn-large:hover {
+  background: #ef233c;
+}
+.paper-exhausted-banner {
+  margin: 0 20px 16px;
+  background: rgba(60, 16, 22, 0.85);
+  border: 1px solid #b72b38;
+  border-left: 5px solid #ff384e;
+  border-radius: 8px;
+  padding: 14px 18px;
+  animation: fadeIn 0.3s ease-in-out;
+}
+.exhausted-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.exhausted-tag {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+  color: #ff99a8;
+  text-transform: uppercase;
+}
+.exhausted-desc {
+  font-size: 13px;
+  color: #fce4e7;
+  margin: 0;
+  line-height: 1.45;
+}
+.paper-executions-wrap {
+  border-top: 1px solid #1a2736;
+  padding: 16px 20px 20px;
+}
+.paper-exec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.paper-exec-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge-open {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.badge-close {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(192, 132, 252, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.connect-delta-btn {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+}
+.connect-delta-btn:hover {
+  background: #334155;
+  color: #fff;
+}
+.creds-dialog {
+  max-width: 440px;
+}
+.creds-input-group {
+  margin-bottom: 14px;
+  text-align: left;
+}
+.creds-input-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+.creds-input-group input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 13px;
+  font-family: monospace;
+  box-sizing: border-box;
+}
+.creds-input-group input:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+.creds-btn-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.creds-cancel-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #94a3b8;
+  font-size: 13px;
+  cursor: pointer;
+}
+.creds-cancel-btn:hover {
+  background: #334155;
+  color: #f8fafc;
+}
