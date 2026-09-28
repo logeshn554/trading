@@ -6,6 +6,7 @@ let latestData = null;
 let selectedLots = 1;
 let lockoutInterval = null;
 let busy = false;
+let limitsUserDirty = false;
 
 function num(value, digits = 6) {
   if (value === null || value === undefined || value === '') return '—';
@@ -29,6 +30,7 @@ function field(row, ...keys) {
 
 function renderRows(id, rows, columns, emptyText) {
   const body = byId(id);
+  if (!body) return;
   body.replaceChildren();
   if (!Array.isArray(rows) || rows.length === 0) {
     const tr = document.createElement('tr');
@@ -87,22 +89,28 @@ function updateIpDisplay(ip) {
   }
 }
 
-/* ==================== OTP AUTHENTICATION & LOCKOUT ==================== */
+/* ==================== OTP AUTHENTICATION & LOCKOUT (ZERO INLINE STYLES) ==================== */
 
 function showOtpModal() {
   const modal = byId('otp-modal');
-  if (modal) modal.style.display = 'flex';
+  if (modal) {
+    modal.classList.remove('hidden');
+  }
   const pinInput = byId('otp-pin');
   if (pinInput && !pinInput.disabled) {
-    pinInput.focus();
+    setTimeout(() => pinInput.focus(), 100);
   }
 }
 
 function hideOtpModal() {
   const modal = byId('otp-modal');
-  if (modal) modal.style.display = 'none';
+  if (modal) {
+    modal.classList.add('hidden');
+  }
   const alertEl = byId('otp-alert');
-  if (alertEl) alertEl.style.display = 'none';
+  if (alertEl) {
+    alertEl.classList.add('hidden');
+  }
 }
 
 function startLockoutTimer(seconds) {
@@ -117,11 +125,11 @@ function startLockoutTimer(seconds) {
 
   if (pinInput) pinInput.disabled = true;
   if (submitBtn) submitBtn.disabled = true;
-  if (timerBadge) timerBadge.style.display = 'flex';
+  if (timerBadge) timerBadge.classList.remove('hidden');
   if (timerSecs) timerSecs.textContent = remaining;
   if (alertEl) {
     alertEl.textContent = '❌ Incorrect PIN entered. Security cooldown active: Please wait 30 seconds.';
-    alertEl.style.display = 'block';
+    alertEl.classList.remove('hidden');
   }
 
   lockoutInterval = setInterval(() => {
@@ -137,10 +145,10 @@ function startLockoutTimer(seconds) {
         pinInput.focus();
       }
       if (submitBtn) submitBtn.disabled = false;
-      if (timerBadge) timerBadge.style.display = 'none';
+      if (timerBadge) timerBadge.classList.add('hidden');
       if (alertEl) {
         alertEl.textContent = 'Cooldown finished. You may enter your 6-digit PIN now.';
-        alertEl.style.display = 'block';
+        alertEl.classList.remove('hidden');
       }
     }
   }, 1000);
@@ -179,7 +187,7 @@ if (otpForm) {
     if (!pin || pin.length !== 6) {
       if (alertEl) {
         alertEl.textContent = 'Please enter all 6 digits of your PIN.';
-        alertEl.style.display = 'block';
+        alertEl.classList.remove('hidden');
       }
       return;
     }
@@ -213,7 +221,7 @@ if (otpForm) {
     } catch (err) {
       if (alertEl) {
         alertEl.textContent = 'Network error while verifying OTP: ' + err.message;
-        alertEl.style.display = 'block';
+        alertEl.classList.remove('hidden');
       }
     } finally {
       if (submitBtn && (!lockoutInterval)) {
@@ -239,15 +247,24 @@ if (lockBtn) {
   });
 }
 
-/* ==================== LOT SIZING & BALANCE VALIDATION ==================== */
+/* ==================== ALGO LOT SIZING & BALANCE VALIDATION ==================== */
 
-function updateLots(newLotCount) {
-  const maxLots = (latestData?.strategy?.risk_limits?.contract_size) || 100;
-  selectedLots = Math.max(1, Math.min(maxLots, parseInt(newLotCount, 10) || 1));
+function updateLots(newLotCount, fromUser = false) {
+  const parsed = parseInt(newLotCount, 10);
+  selectedLots = Math.max(1, Math.min(100, isNaN(parsed) ? 1 : parsed));
 
   const lotInput = byId('lot-size-input');
   if (lotInput && parseInt(lotInput.value, 10) !== selectedLots) {
     lotInput.value = selectedLots;
+  }
+
+  const algoLotInput = byId('algo-lot-size');
+  if (algoLotInput && parseInt(algoLotInput.value, 10) !== selectedLots) {
+    algoLotInput.value = selectedLots;
+  }
+
+  if (fromUser) {
+    limitsUserDirty = true;
   }
 
   // Update preset chips
@@ -260,7 +277,6 @@ function updateLots(newLotCount) {
     }
   });
 
-  // Re-calculate margins and check balance
   recalculateSizingAndBalance();
 }
 
@@ -274,7 +290,7 @@ function recalculateSizingAndBalance() {
   const ethPerLot = 0.001;
   const totalEth = selectedLots * ethPerLot;
   const notionalUsd = totalEth * markPrice;
-  const usdToInr = 87.0; // Current approximate USD/INR conversion rate
+  const usdToInr = 87.0; // Approximate USD/INR conversion rate
   const notionalInr = notionalUsd * usdToInr;
 
   // 10x leverage margin requirement (~10%)
@@ -323,12 +339,7 @@ function recalculateSizingAndBalance() {
   const availNote = byId('disp-avail-note');
   if (availNote) availNote.textContent = wallets.length ? `${wallets.length} active wallet asset(s)` : 'No wallet assets found';
 
-  document.querySelectorAll('.dyn-lot-label').forEach(el => {
-    el.textContent = selectedLots;
-  });
-
   // Balance Sufficiency Evaluation
-  const isLive = Boolean(latestData.strategy?.live_orders_enabled);
   const isFunded = availBal > 0;
   const isSufficient = isFunded && (availBal >= reqMargin);
 
@@ -337,8 +348,6 @@ function recalculateSizingAndBalance() {
   const buyingNote = byId('disp-buying-note');
   const warningBanner = byId('balance-warning-alert');
   const warningText = byId('balance-warning-text');
-  const buyBtn = byId('buy-order-btn');
-  const sellBtn = byId('sell-order-btn');
 
   if (isSufficient) {
     if (statusBadge) {
@@ -349,19 +358,11 @@ function recalculateSizingAndBalance() {
       buyingStatus.className = 'positive';
       buyingStatus.textContent = 'Sufficient';
     }
-    if (buyingNote) buyingNote.textContent = 'Ready to execute live';
-    if (warningBanner) warningBanner.style.display = 'none';
-
-    if (buyBtn) {
-      buyBtn.disabled = !isLive;
-      buyBtn.title = isLive ? `Buy / Long ${selectedLots} lot(s)` : 'Live trading is paused';
-    }
-    if (sellBtn) {
-      sellBtn.disabled = !isLive;
-      sellBtn.title = isLive ? `Sell / Short ${selectedLots} lot(s)` : 'Live trading is paused';
+    if (buyingNote) buyingNote.textContent = 'Ready for auto-orders';
+    if (warningBanner) {
+      warningBanner.classList.add('hidden');
     }
   } else {
-    // Insufficient Balance
     if (statusBadge) {
       statusBadge.className = 'badge-insufficient';
       statusBadge.textContent = '🔴 Insufficient Balance';
@@ -374,45 +375,50 @@ function recalculateSizingAndBalance() {
       buyingNote.textContent = `Need at least ~₹${moneyFmt.format(reqMarginInr)}`;
     }
     if (warningBanner) {
-      warningBanner.style.display = 'block';
+      warningBanner.classList.remove('hidden');
       if (warningText) {
         if (!isFunded) {
-          warningText.textContent = `Your available balance is ₹0.00. Cannot place orders for ${selectedLots} lot(s). Please deposit funds to Delta India first.`;
+          warningText.textContent = `Your available balance is ₹0.00. Cannot place automated orders for ${selectedLots} lot(s). Please deposit funds to Delta India first.`;
         } else {
-          warningText.textContent = `Insufficient balance: Placing ${selectedLots} lot(s) requires ~₹${moneyFmt.format(reqMarginInr)} margin, but your available balance is only ${moneyFmt.format(availBal)} ${preferredAsset}. Please deposit funds or reduce lot count.`;
+          warningText.textContent = `Insufficient balance: ${selectedLots} lot(s) require ~₹${moneyFmt.format(reqMarginInr)} margin, but available balance is only ${moneyFmt.format(availBal)} ${preferredAsset}. Deposit funds or reduce lot size.`;
         }
       }
-    }
-
-    if (buyBtn) {
-      buyBtn.disabled = true;
-      buyBtn.title = 'Cannot buy: Insufficient balance';
-    }
-    if (sellBtn) {
-      sellBtn.disabled = true;
-      sellBtn.title = 'Cannot sell: Insufficient balance';
     }
   }
 }
 
 // Stepper and Preset listeners
 const decBtn = byId('lot-dec-btn');
-if (decBtn) decBtn.addEventListener('click', () => updateLots(selectedLots - 1));
+if (decBtn) decBtn.addEventListener('click', () => updateLots(selectedLots - 1, true));
 
 const incBtn = byId('lot-inc-btn');
-if (incBtn) incBtn.addEventListener('click', () => updateLots(selectedLots + 1));
+if (incBtn) incBtn.addEventListener('click', () => updateLots(selectedLots + 1, true));
 
 const lotInput = byId('lot-size-input');
 if (lotInput) {
-  lotInput.addEventListener('change', () => updateLots(lotInput.value));
-  lotInput.addEventListener('input', () => updateLots(lotInput.value));
+  lotInput.addEventListener('change', () => updateLots(lotInput.value, true));
+  lotInput.addEventListener('input', () => updateLots(lotInput.value, true));
+}
+
+const algoLotInput = byId('algo-lot-size');
+if (algoLotInput) {
+  algoLotInput.addEventListener('change', () => updateLots(algoLotInput.value, true));
+  algoLotInput.addEventListener('input', () => updateLots(algoLotInput.value, true));
 }
 
 document.querySelectorAll('.preset-chip').forEach(btn => {
   btn.addEventListener('click', () => {
     const lots = parseInt(btn.dataset.lots, 10);
-    if (lots) updateLots(lots);
+    if (lots) updateLots(lots, true);
   });
+});
+
+// Mark dirty when user types into any limit input so background polling doesn't overwrite
+['max-trades', 'algo-lot-size', 'profit-target', 'daily-loss', 'stop-loss', 'take-profit'].forEach(id => {
+  const el = byId(id);
+  if (el) {
+    el.addEventListener('input', () => { limitsUserDirty = true; });
+  }
 });
 
 /* ==================== DASHBOARD RENDERING ==================== */
@@ -420,11 +426,20 @@ document.querySelectorAll('.preset-chip').forEach(btn => {
 function render(data) {
   latestData = data;
   const connected = data.connection === 'connected';
-  byId('sign-out').hidden = !data.public_mode;
-  byId('environment').textContent = data.environment === 'india_testnet' ? 'INDIA TESTNET' : 'INDIA PRODUCTION';
-  byId('connection').textContent = connected ? 'ACCOUNT CONNECTED' : 'ACCOUNT NOT CONNECTED';
-  byId('connection').className = `connection ${connected ? 'connected' : 'disconnected'}`;
-  byId('as-of').textContent = data.as_of ? `Last checked ${time(data.as_of)}` : 'Account data unavailable';
+  const signOutEl = byId('sign-out');
+  if (signOutEl) signOutEl.hidden = !data.public_mode;
+
+  const envEl = byId('environment');
+  if (envEl) envEl.textContent = data.environment === 'india_testnet' ? 'INDIA TESTNET' : 'INDIA PRODUCTION';
+
+  const connEl = byId('connection');
+  if (connEl) {
+    connEl.textContent = connected ? 'ACCOUNT CONNECTED' : 'ACCOUNT NOT CONNECTED';
+    connEl.className = `connection ${connected ? 'connected' : 'disconnected'}`;
+  }
+
+  const asOfEl = byId('as-of');
+  if (asOfEl) asOfEl.textContent = data.as_of ? `Last checked ${time(data.as_of)}` : 'Account data unavailable';
 
   if (data.outbound_ip) {
     updateIpDisplay(data.outbound_ip);
@@ -440,30 +455,48 @@ function render(data) {
   } else if (Object.keys(data.errors || {}).length) {
     setNotice(`Connected with incomplete data: ${Object.entries(data.errors).map(([key, value]) => `${key}: ${value}`).join('; ')}`, 'warn');
   } else {
-    setNotice('Live Delta account data received. No paper balances or simulated P&L are shown.', 'ok');
+    setNotice('Live Delta account data received. Algorithmic trade execution active.', 'ok');
   }
 
   const ticker = data.ticker?.result || data.ticker || {};
-  byId('eth-price').textContent = num(field(ticker, 'mark_price', 'close', 'last_price', 'price'), 2);
-  byId('market-note').textContent = data.errors?.ticker || 'Delta ETHUSD market data';
+  const ethPrice = byId('eth-price');
+  if (ethPrice) ethPrice.textContent = num(field(ticker, 'mark_price', 'close', 'last_price', 'price'), 2);
+
+  const marketNote = byId('market-note');
+  if (marketNote) marketNote.textContent = data.errors?.ticker || 'Delta ETHUSD market data';
 
   const wallets = Array.isArray(data.wallets) ? data.wallets : [];
   const preferred = wallets.find(w => ['INR', 'USDT', 'USD'].includes(w.asset_symbol) && Number(w.balance) !== 0) || wallets[0];
-  byId('balance').textContent = preferred ? `${num(preferred.balance, 2)} ${preferred.asset_symbol || ''}` : '—';
-  byId('available').textContent = preferred ? `${num(preferred.available_balance, 2)} ${preferred.asset_symbol || ''}` : '—';
-  byId('balance-note').textContent = preferred ? 'Selected wallet · all assets below' : 'No wallet data';
-  byId('available-note').textContent = preferred ? 'Selected wallet · all assets below' : 'No wallet data';
-  byId('realized').textContent = pnlMap(data.realized_pnl_open_positions);
-  byId('unrealized').textContent = pnlMap(data.unrealized_pnl_open_positions);
+  const balanceEl = byId('balance');
+  if (balanceEl) balanceEl.textContent = preferred ? `${num(preferred.balance, 2)} ${preferred.asset_symbol || ''}` : '—';
 
-  byId('wallet-count').textContent = connected ? `${wallets.length} asset${wallets.length === 1 ? '' : 's'}` : '—';
+  const availEl = byId('available');
+  if (availEl) availEl.textContent = preferred ? `${num(preferred.available_balance, 2)} ${preferred.asset_symbol || ''}` : '—';
+
+  const balNote = byId('balance-note');
+  if (balNote) balNote.textContent = preferred ? 'Selected wallet · all assets below' : 'No wallet data';
+
+  const availNote = byId('available-note');
+  if (availNote) availNote.textContent = preferred ? 'Selected wallet · all assets below' : 'No wallet data';
+
+  const realizedEl = byId('realized');
+  if (realizedEl) realizedEl.textContent = pnlMap(data.realized_pnl_open_positions);
+
+  const unrealizedEl = byId('unrealized');
+  if (unrealizedEl) unrealizedEl.textContent = pnlMap(data.unrealized_pnl_open_positions);
+
+  const walletCount = byId('wallet-count');
+  if (walletCount) walletCount.textContent = connected ? `${wallets.length} asset${wallets.length === 1 ? '' : 's'}` : '—';
+
   renderRows('wallet-rows', wallets, [
     r => field(r, 'asset_symbol'), r => num(r.balance), r => num(r.available_balance),
     r => num(r.position_margin), r => num(r.order_margin), r => num(r.strategy_blocked_amount),
   ], data.errors?.wallets || (connected ? 'No wallet assets returned' : 'Connect a Read Data key'));
 
   const positions = Array.isArray(data.positions) ? data.positions : [];
-  byId('position-count').textContent = connected ? `${positions.length} open` : '—';
+  const posCount = byId('position-count');
+  if (posCount) posCount.textContent = connected ? `${positions.length} open` : '—';
+
   renderRows('position-rows', positions, [
     product, r => num(r.size), r => num(r.entry_price, 2), r => num(r.mark_price, 2),
     r => num(r.liquidation_price, 2), r => `${num(r.margin)} ${settlementAsset(r)}`,
@@ -472,66 +505,104 @@ function render(data) {
   ], data.errors?.positions || (connected ? 'No open positions' : 'Connect a Read Data key'));
 
   const fills = Array.isArray(data.fills) ? data.fills : [];
-  byId('fill-count').textContent = connected ? `${fills.length} shown` : '—';
+  const fillCount = byId('fill-count');
+  if (fillCount) fillCount.textContent = connected ? `${fills.length} shown` : '—';
+
   renderRows('fill-rows', fills, [
     r => time(r.created_at), product, r => field(r, 'side'), r => num(r.size),
     r => num(r.price, 2), r => num(r.commission), r => field(r, 'settling_asset_symbol'),
   ], data.errors?.fills || (connected ? 'No fills in this window' : 'Connect a Read Data key'));
-  byId('fills-note').textContent = !connected ? 'Connect a Read Data key to view fills.' : data.fills_after ? 'Showing the first 100 of the last 30 days. Additional pages exist on Delta.' : 'Last 30 days; no additional page reported by Delta.';
+
+  const fillsNote = byId('fills-note');
+  if (fillsNote) fillsNote.textContent = !connected ? 'Connect a Read Data key to view fills.' : data.fills_after ? 'Showing the first 100 of the last 30 days. Additional pages exist on Delta.' : 'Last 30 days; no additional page reported by Delta.';
 
   const txs = Array.isArray(data.transactions) ? data.transactions : [];
-  byId('transaction-count').textContent = connected ? `${txs.length} shown` : '—';
+  const txCount = byId('transaction-count');
+  if (txCount) txCount.textContent = connected ? `${txs.length} shown` : '—';
+
   renderRows('transaction-rows', txs, [
     r => time(r.created_at), r => field(r, 'asset_symbol'), r => field(r, 'transaction_type'),
     r => num(r.amount), r => num(r.balance),
   ], data.errors?.transactions || (connected ? 'No wallet transactions in this window' : 'Connect a Read Data key'));
-  byId('transactions-note').textContent = !connected ? 'Connect a Read Data key to view wallet history.' : data.transactions_after ? 'Showing the first 100 of the last 30 days. Additional pages exist on Delta.' : 'Last 30 days; transaction types remain separate.';
+
+  const txNote = byId('transactions-note');
+  if (txNote) txNote.textContent = !connected ? 'Connect a Read Data key to view wallet history.' : data.transactions_after ? 'Showing the first 100 of the last 30 days. Additional pages exist on Delta.' : 'Last 30 days; transaction types remain separate.';
 
   const orders = Array.isArray(data.open_orders) ? data.open_orders : [];
-  byId('order-count').textContent = connected ? `${orders.length} open / pending` : '—';
+  const orderCount = byId('order-count');
+  if (orderCount) orderCount.textContent = connected ? `${orders.length} open / pending` : '—';
+
   renderRows('order-rows', orders, [
     product, r => field(r, 'side'), r => field(r, 'order_type'), r => num(r.size),
     r => num(field(r, 'limit_price', 'stop_price'), 2), r => field(r, 'state'), r => field(r, 'id', 'client_order_id'),
   ], data.errors?.open_orders || (connected ? 'No open orders' : 'Connect a Read Data key'));
 
   const strategy = data.strategy || {};
-  byId('strategy-name').textContent = strategy.id || 'Primary strategy';
-  byId('strategy-reason').textContent = strategy.reason || 'Live Trading Configuration';
+  const stratName = byId('strategy-name');
+  if (stratName) stratName.textContent = strategy.id || 'Primary strategy';
+
+  const stratReason = byId('strategy-reason');
+  if (stratReason) stratReason.textContent = strategy.reason || 'Algorithmic Execution Active';
+
   const isLive = Boolean(strategy.live_orders_enabled);
   const stateEl = byId('strategy-state');
-  stateEl.textContent = isLive ? 'VALIDATED · LIVE ACTIVE' : (strategy.validation || 'BLOCKED');
-  stateEl.className = isLive ? 'ready-pill' : 'blocked-pill';
+  if (stateEl) {
+    stateEl.textContent = isLive ? 'VALIDATED · LIVE ACTIVE' : (strategy.validation || 'BLOCKED');
+    stateEl.className = isLive ? 'ready-pill' : 'blocked-pill';
+  }
 
+  // Populate risk limits form only if user has not modified inputs
   const limits = strategy.risk_limits || {};
-  const limitValue = value => value === null || value === undefined ? 'Not set' : `₹${num(value, 2)}`;
-  byId('max-trades').value = limits.max_trades_per_day ? `${limits.max_trades_per_day} trades/day` : 'Not set';
-  byId('profit-target').value = limitValue(limits.daily_net_profit_target);
-  byId('daily-loss').value = limitValue(limits.daily_max_loss);
-  byId('stop-loss').value = limitValue(limits.per_trade_stop_loss);
-  byId('take-profit').value = limitValue(limits.per_trade_take_profit);
+  const serverLot = limits.contract_size || 1;
+
+  if (!limitsUserDirty) {
+    const setVal = (id, val) => {
+      const el = byId(id);
+      if (el && val !== undefined && val !== null) {
+        el.value = val;
+      }
+    };
+    setVal('max-trades', limits.max_trades_per_day ?? 5);
+    setVal('algo-lot-size', serverLot);
+    setVal('lot-size-input', serverLot);
+    setVal('profit-target', limits.daily_net_profit_target ?? 1200);
+    setVal('daily-loss', limits.daily_max_loss ?? 1000);
+    setVal('stop-loss', limits.per_trade_stop_loss ?? 300);
+    setVal('take-profit', limits.per_trade_take_profit ?? 600);
+    updateLots(serverLot, false);
+  }
 
   const switchBtn = byId('live-switch');
-  switchBtn.textContent = isLive ? 'LIVE ON · ACTIVE' : 'LIVE OFF · PAUSED';
-  switchBtn.className = isLive ? 'live-active-btn' : 'live-off-btn';
-  switchBtn.disabled = false;
+  if (switchBtn) {
+    switchBtn.textContent = isLive ? 'ALGO LIVE · ACTIVE' : 'ALGO PAUSED · OFF';
+    switchBtn.className = isLive ? 'live-active-btn' : 'live-off-btn';
+    switchBtn.disabled = false;
+  }
+
+  const algoStatus = byId('algo-run-status');
+  if (algoStatus) {
+    algoStatus.textContent = isLive ? 'AUTO-TRADING ACTIVE' : 'AUTO-TRADING PAUSED';
+    algoStatus.className = isLive ? 'ready-pill' : 'blocked-pill';
+  }
 
   const controlNote = byId('control-note');
   if (controlNote) {
     controlNote.textContent = isLive
-      ? 'Live order execution is ACTIVE. Delta Trading Key is enabled with conservative sizing and strict INR risk limits.'
-      : 'Live order execution is currently PAUSED. Click button above to resume.';
+      ? 'Algorithmic execution is ACTIVE. Automated signals execute on Delta India within strict INR risk limits.'
+      : 'Algorithmic execution is currently PAUSED. Click button above to resume automated trading.';
   }
 
   const blockers = strategy.trading_readiness?.blockers || [];
   const blockerList = byId('live-blockers');
-  blockerList.replaceChildren();
-  for (const reason of blockers) {
-    const item = document.createElement('li');
-    item.textContent = reason;
-    blockerList.append(item);
+  if (blockerList) {
+    blockerList.replaceChildren();
+    for (const reason of blockers) {
+      const item = document.createElement('li');
+      item.textContent = reason;
+      blockerList.append(item);
+    }
   }
 
-  // Update lot sizing and sufficient balance checks
   recalculateSizingAndBalance();
 }
 
@@ -539,8 +610,10 @@ async function refresh(fresh = false) {
   if (busy) return;
   busy = true;
   const button = byId('refresh');
-  button.disabled = true;
-  button.textContent = 'Refreshing…';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Refreshing…';
+  }
   try {
     const response = await fetch(`/api/snapshot${fresh ? '?fresh=1' : ''}`, {cache: 'no-store'});
     if (response.status === 401) {
@@ -557,13 +630,16 @@ async function refresh(fresh = false) {
   } catch (error) {
     setNotice(`Cannot reach the local dashboard: ${error.message}`, 'error');
   } finally {
-    button.disabled = false;
-    button.textContent = 'Refresh';
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Refresh';
+    }
     busy = false;
   }
 }
 
-byId('refresh').addEventListener('click', () => refresh(true));
+const refreshBtn = byId('refresh');
+if (refreshBtn) refreshBtn.addEventListener('click', () => refresh(true));
 
 function copyIp() {
   const display = byId('ip-address-display');
@@ -605,57 +681,99 @@ if (liveSwitch) {
   });
 }
 
-// Order Submission Handler
-async function submitTradeOrder(side) {
-  const isLive = Boolean(latestData?.strategy?.live_orders_enabled);
-  if (!isLive) {
-    alert('Live Trading is currently OFF. Please turn ON Live Trading first.');
-    return;
-  }
+// Reset button listener
+const resetLimitsBtn = byId('reset-limits-btn');
+if (resetLimitsBtn) {
+  resetLimitsBtn.addEventListener('click', () => {
+    limitsUserDirty = false;
+    if (latestData) {
+      render(latestData);
+    }
+    const statusMsg = byId('save-limits-status');
+    if (statusMsg) {
+      statusMsg.textContent = '↺ Reset to current saved limits.';
+      statusMsg.className = 'save-status-msg';
+      setTimeout(() => { if (statusMsg) statusMsg.textContent = ''; }, 3000);
+    }
+  });
+}
 
-  const promptMsg = `Confirm Market ${side.toUpperCase()} Order:\n\nInstrument: ETHUSD (Delta India)\nLots: ${selectedLots} Contract(s)\nSide: ${side.toUpperCase()}\n\nDo you want to submit this live order now?`;
-  if (!confirm(promptMsg)) return;
+// Save Algorithmic Risk Limits
+const saveLimitsBtn = byId('save-limits-btn');
+if (saveLimitsBtn) {
+  saveLimitsBtn.addEventListener('click', async () => {
+    const statusMsg = byId('save-limits-status');
+    const maxTrades = parseInt(byId('max-trades')?.value, 10);
+    const lotSize = parseInt(byId('algo-lot-size')?.value || byId('lot-size-input')?.value, 10);
+    const profitTarget = parseFloat(byId('profit-target')?.value);
+    const dailyLoss = parseFloat(byId('daily-loss')?.value);
+    const stopLoss = parseFloat(byId('stop-loss')?.value);
+    const takeProfit = parseFloat(byId('take-profit')?.value);
 
-  const buyBtn = byId('buy-order-btn');
-  const sellBtn = byId('sell-order-btn');
-  if (buyBtn) buyBtn.disabled = true;
-  if (sellBtn) sellBtn.disabled = true;
-
-  try {
-    const res = await fetch('/api/trade/order', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({side, size: selectedLots})
-    });
-    const data = await res.json();
-
-    if (data.requires_otp) {
-      showOtpModal();
+    if (isNaN(maxTrades) || maxTrades < 1) {
+      if (statusMsg) {
+        statusMsg.textContent = '❌ Max trades per day must be at least 1.';
+        statusMsg.className = 'save-status-msg err';
+      }
       return;
     }
 
-    if (res.ok && data.status === 'success') {
-      alert(`Success! Market ${side.toUpperCase()} order for ${selectedLots} lot(s) placed on Delta India.`);
-      refresh(true);
-    } else {
-      alert(`Order Failed: ${data.error || JSON.stringify(data)}`);
-      refresh(true);
+    if (isNaN(lotSize) || lotSize < 1 || lotSize > 100) {
+      if (statusMsg) {
+        statusMsg.textContent = '❌ Trade lot size must be between 1 and 100 contracts.';
+        statusMsg.className = 'save-status-msg err';
+      }
+      return;
     }
-  } catch (err) {
-    alert(`Order execution error: ${err.message}`);
-  } finally {
-    recalculateSizingAndBalance();
-  }
-}
 
-const buyOrderBtn = byId('buy-order-btn');
-if (buyOrderBtn) {
-  buyOrderBtn.addEventListener('click', () => submitTradeOrder('buy'));
-}
+    saveLimitsBtn.disabled = true;
+    if (statusMsg) {
+      statusMsg.textContent = 'Saving…';
+      statusMsg.className = 'save-status-msg';
+    }
 
-const sellOrderBtn = byId('sell-order-btn');
-if (sellOrderBtn) {
-  sellOrderBtn.addEventListener('click', () => submitTradeOrder('sell'));
+    try {
+      const res = await fetch('/api/strategy/risk_limits', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          max_trades_per_day: maxTrades,
+          contract_size: lotSize,
+          daily_net_profit_target: isNaN(profitTarget) ? 1200 : profitTarget,
+          daily_max_loss: isNaN(dailyLoss) ? 1000 : dailyLoss,
+          per_trade_stop_loss: isNaN(stopLoss) ? 300 : stopLoss,
+          per_trade_take_profit: isNaN(takeProfit) ? 600 : takeProfit
+        })
+      });
+      const data = await res.json();
+      if (data.requires_otp) {
+        showOtpModal();
+        if (statusMsg) statusMsg.textContent = '';
+        return;
+      }
+      if (res.ok && data.status === 'success') {
+        limitsUserDirty = false;
+        if (statusMsg) {
+          statusMsg.textContent = '✅ Algo risk limits & lot size saved!';
+          statusMsg.className = 'save-status-msg ok';
+          setTimeout(() => { if (statusMsg) statusMsg.textContent = ''; }, 4000);
+        }
+        refresh(true);
+      } else {
+        if (statusMsg) {
+          statusMsg.textContent = `❌ ${data.error || 'Failed to save risk limits.'}`;
+          statusMsg.className = 'save-status-msg err';
+        }
+      }
+    } catch (err) {
+      if (statusMsg) {
+        statusMsg.textContent = `❌ Network error: ${err.message}`;
+        statusMsg.className = 'save-status-msg err';
+      }
+    } finally {
+      saveLimitsBtn.disabled = false;
+    }
+  });
 }
 
 // Initial checks & poll loops
@@ -671,7 +789,8 @@ fetch('/api/my-ip')
   .catch(() => {});
 
 setInterval(() => {
-  if (!byId('otp-modal') || byId('otp-modal').style.display === 'none') {
+  const modal = byId('otp-modal');
+  if (!modal || modal.classList.contains('hidden')) {
     refresh();
   }
 }, 30000);

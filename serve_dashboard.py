@@ -188,7 +188,9 @@ def trading_readiness(strategy: dict) -> dict:
 def build_snapshot(client: DeltaMcpClient) -> dict:
     now = datetime.now(timezone.utc)
     readiness = trading_readiness(STRATEGY)
-    reason = "Micro conservative (1 contract) with INR risk caps enforced" if readiness["effective_enabled"] else (STRATEGY["blockers"][0] if STRATEGY.get("blockers") else "Live Trading Enabled")
+    cur_lots = STRATEGY.get("risk_limits", {}).get("contract_size", 1)
+    lot_str = f"{cur_lots} lot{'s' if cur_lots != 1 else ''}"
+    reason = f"Algorithmic execution active ({lot_str}) with INR risk caps enforced" if readiness["effective_enabled"] else (STRATEGY["blockers"][0] if STRATEGY.get("blockers") else "Live Trading Enabled")
     result: dict = {
         "as_of": now.isoformat(), "environment": client.environment, "public_mode": PUBLIC_MODE,
         "outbound_ip": get_outbound_ip(),
@@ -422,6 +424,80 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._send_json({"live_orders_enabled": new_state})
             return
 
+        elif parsed.path == "/api/strategy/risk_limits":
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len) if content_len > 0 else b"{}"
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                limits = STRATEGY.setdefault("risk_limits", {})
+                
+                if "max_trades_per_day" in payload:
+                    val = int(payload["max_trades_per_day"])
+                    if val < 1:
+                        self._send_json({"error": "Max trades per day must be at least 1."}, 400)
+                        return
+                    limits["max_trades_per_day"] = val
+                
+                if "daily_net_profit_target" in payload:
+                    limits["daily_net_profit_target"] = round(float(payload["daily_net_profit_target"]), 2)
+                
+                if "daily_max_loss" in payload:
+                    limits["daily_max_loss"] = round(float(payload["daily_max_loss"]), 2)
+                    
+                if "per_trade_stop_loss" in payload:
+                    limits["per_trade_stop_loss"] = round(float(payload["per_trade_stop_loss"]), 2)
+                    
+                if "per_trade_take_profit" in payload:
+                    limits["per_trade_take_profit"] = round(float(payload["per_trade_take_profit"]), 2)
+                    
+                if "contract_size" in payload:
+                    val = int(payload["contract_size"])
+                    if val < 1 or val > 100:
+                        self._send_json({"error": "Contract lot size must be between 1 and 100."}, 400)
+                        return
+                    limits["contract_size"] = val
+                    
+                try:
+                    (ROOT / "config/production_strategy.json").write_text(json.dumps(STRATEGY, indent=2), encoding="utf-8")
+                except Exception as e:
+                    self._send_json({"error": f"Failed to save strategy file: {e}"}, 500)
+                    return
+                with _cache_lock:
+                    _cache["at"] = 0.0
+                self._send_json({"status": "success", "risk_limits": limits})
+                return
+            except (ValueError, TypeError) as exc:
+                self._send_json({"error": f"Invalid parameter format: {exc}"}, 400)
+                return
+
+        elif parsed.path == "/api/strategy/lot_size":
+            content_len = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_len) if content_len > 0 else b"{}"
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                if "contract_size" not in payload:
+                    self._send_json({"error": "contract_size is required."}, 400)
+                    return
+                val = int(payload["contract_size"])
+                if val < 1 or val > 100:
+                    self._send_json({"error": "Contract lot size must be between 1 and 100."}, 400)
+                    return
+                limits = STRATEGY.setdefault("risk_limits", {})
+                limits["contract_size"] = val
+                try:
+                    (ROOT / "config/production_strategy.json").write_text(json.dumps(STRATEGY, indent=2), encoding="utf-8")
+                except Exception as e:
+                    self._send_json({"error": f"Failed to save strategy file: {e}"}, 500)
+                    return
+                with _cache_lock:
+                    _cache["at"] = 0.0
+                self._send_json({"status": "success", "contract_size": val, "risk_limits": limits})
+                return
+            except (ValueError, TypeError) as exc:
+                self._send_json({"error": f"Invalid parameter format: {exc}"}, 400)
+                return
+
+
         elif parsed.path == "/api/trade/order":
             content_len = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_len) if content_len > 0 else b"{}"
@@ -642,10 +718,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self._redirect("/", f"dashboard_session={encoded}.{signature}; Path=/; Max-Age=43200; HttpOnly; Secure; SameSite=Lax")
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'")
         super().end_headers()
 
     def _send_json(self, value: object, status: int = 200):

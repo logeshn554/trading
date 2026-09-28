@@ -27,7 +27,7 @@
 
     <main>
       <!-- Security OTP Access Modal -->
-      <div id="otp-modal" class="otp-modal-backdrop" style="display:none;">
+      <div id="otp-modal" class="otp-modal-backdrop hidden">
         <div class="otp-dialog">
           <div class="otp-shield">🛡️</div>
           <h2>Security Verification</h2>
@@ -37,8 +37,8 @@
             <div class="otp-input-wrap">
               <input type="password" id="otp-pin" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="Enter 6-digit PIN" required>
             </div>
-            <div id="otp-alert" class="otp-alert" style="display:none;"></div>
-            <div id="lockout-timer" class="lockout-badge" style="display:none;">
+            <div id="otp-alert" class="otp-alert hidden"></div>
+            <div id="lockout-timer" class="lockout-badge hidden">
               <span class="pulse-dot"></span> Security cooldown: Please wait <strong id="lockout-seconds">30</strong>s
             </div>
             <button id="otp-submit-btn" type="submit" class="otp-submit-btn">Unlock Terminal</button>
@@ -106,27 +106,52 @@
       
       <section class="section-card trade-controls">
         <div class="section-head">
-          <div><p class="eyebrow">LIVE TRADING CONTROLS</p><h2>Order execution &amp; Sizing</h2></div>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <button id="live-switch" type="button" class="live-active-btn">LIVE ON · ACTIVE</button>
+          <div><p class="eyebrow">ALGO TRADING AUTOMATION &amp; RISK CONTROLS</p><h2>Automated Strategy Execution</h2></div>
+          <div class="flex-center-gap">
+            <button id="live-switch" type="button" class="live-active-btn">ALGO LIVE · ACTIVE</button>
           </div>
         </div>
-        <p id="control-note" class="control-note">Live order execution is ACTIVE. Delta Trading Key is enabled with conservative sizing and strict INR risk limits.</p>
+        <p id="control-note" class="control-note">Algorithmic execution only. Manual trade entry is disabled. Trades trigger automatically from verified signals within strict INR risk caps.</p>
         <ul id="live-blockers" class="control-blockers"></ul>
 
-        <!-- Lot Sizing & Sufficient Balance Panel -->
+        <!-- Enforced Algorithmic Risk Limits (Editable) -->
+        <div class="risk-controls-panel">
+          <div class="risk-panel-head">
+            <div>
+              <h3 class="risk-panel-title">Enforced Algorithmic Risk Limits (INR)</h3>
+              <span class="muted muted-small">Strategy automatically halts execution if daily loss or trade count limits are hit.</span>
+            </div>
+          </div>
+
+          <div class="limit-grid">
+            <label>Maximum trades per day<input id="max-trades" type="number" min="1" max="100" step="1" value="5"></label>
+            <label>Trade lot size · Contracts<input id="algo-lot-size" type="number" min="1" max="100" step="1" value="1"></label>
+            <label>Daily net profit target · INR<input id="profit-target" type="number" min="0" step="50" value="1200"></label>
+            <label>Daily maximum loss · INR<input id="daily-loss" type="number" min="0" step="50" value="1000"></label>
+            <label>Per-trade stop loss · INR<input id="stop-loss" type="number" min="0" step="10" value="300"></label>
+            <label>Per-trade take profit · INR<input id="take-profit" type="number" min="0" step="10" value="600"></label>
+          </div>
+
+          <div class="risk-actions-row">
+            <button id="save-limits-btn" type="button" class="save-limits-btn">💾 Save Algo Risk Limits</button>
+            <button id="reset-limits-btn" type="button" class="reset-limits-btn">↺ Reset</button>
+            <span id="save-limits-status" class="save-status-msg"></span>
+          </div>
+        </div>
+
+        <!-- Automated Lot Sizing & Balance Check Panel -->
         <div class="lot-panel">
           <div class="lot-panel-head">
             <div>
-              <h3 class="lot-panel-title">Contract Lot Sizing</h3>
-              <span class="muted" style="font-size:12px;">ETHUSD Futures · Delta India (1 Lot = 0.001 ETH Notional)</span>
+              <h3 class="lot-panel-title">Automated Order Lot Sizing</h3>
+              <span class="muted muted-small">ETHUSD Futures · Delta India (1 Lot = 0.001 ETH Notional) · Auto-sized per strategy signal</span>
             </div>
             <span id="balance-status-badge" class="badge-sufficient">Checking balance…</span>
           </div>
 
           <div class="lot-selection-row">
             <div class="lot-stepper-box">
-              <span class="lot-input-label">Number of Lots to Trade:</span>
+              <span class="lot-input-label">Auto-Trade Lot Size:</span>
               <div class="stepper-controls">
                 <button type="button" id="lot-dec-btn" class="step-btn">−</button>
                 <input type="number" id="lot-size-input" value="1" min="1" max="100" step="1">
@@ -148,7 +173,7 @@
 
           <div class="sizing-metrics-grid">
             <div class="calc-card">
-              <span class="calc-label">Selected Lots</span>
+              <span class="calc-label">Auto-Order Size</span>
               <strong id="disp-selected-lots">1 Lot (0.001 ETH)</strong>
               <small class="muted" id="disp-notional-val">Notional: ~₹226.00</small>
             </div>
@@ -163,32 +188,24 @@
               <small class="muted" id="disp-avail-note">Wallet balance</small>
             </div>
             <div class="calc-card">
-              <span class="calc-label">Buying Power Check</span>
+              <span class="calc-label">Auto-Execution Readiness</span>
               <strong id="disp-buying-status" class="positive">Sufficient</strong>
-              <small class="muted" id="disp-buying-note">Ready to place orders</small>
+              <small class="muted" id="disp-buying-note">Ready for auto-orders</small>
             </div>
           </div>
 
-          <div id="balance-warning-alert" class="balance-warning-banner" style="display:none;">
-            ⚠️ <span id="balance-warning-text">Insufficient balance to buy the selected number of lots.</span>
+          <div id="balance-warning-alert" class="balance-warning-banner hidden">
+            ⚠️ <span id="balance-warning-text">Insufficient balance for automated trade sizing.</span>
           </div>
 
-          <div class="trade-action-buttons">
-            <button id="buy-order-btn" type="button" class="action-btn-buy">
-              🟢 Buy / Long (<span class="dyn-lot-label">1</span> Lot)
-            </button>
-            <button id="sell-order-btn" type="button" class="action-btn-sell">
-              🔴 Sell / Short (<span class="dyn-lot-label">1</span> Lot)
-            </button>
+          <!-- Automated Trading Only Notice (No Manual Trade Buttons) -->
+          <div class="auto-trading-banner">
+            <div class="auto-banner-left">
+              <span class="auto-badge">🤖 Auto Trading Only</span>
+              <span class="auto-banner-text">Strategy signals (<strong>abs(flow_6) &ge; 0.10</strong>) automatically submit &amp; manage positions on Delta India. Manual trading is disabled.</span>
+            </div>
+            <span id="algo-run-status" class="ready-pill">AUTO-TRADING ACTIVE</span>
           </div>
-        </div>
-
-        <div class="limit-grid" style="margin-top: 15px;">
-          <label>Maximum trades per day<input id="max-trades" type="text" value="5" disabled></label>
-          <label>Daily net profit target · INR<input id="profit-target" type="text" value="₹1,200.00" disabled></label>
-          <label>Daily maximum loss · INR<input id="daily-loss" type="text" value="₹1,000.00" disabled></label>
-          <label>Per-trade stop loss · INR<input id="stop-loss" type="text" value="₹300.00" disabled></label>
-          <label>Per-trade take profit · INR<input id="take-profit" type="text" value="₹600.00" disabled></label>
         </div>
       </section>
     </main>

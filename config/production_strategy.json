@@ -21,7 +21,7 @@
     "daily_max_loss": 1000.0,
     "per_trade_stop_loss": 300.0,
     "per_trade_take_profit": 600.0,
-    "contract_size": 100
+    "contract_size": 1
   },
   "blockers": []
 }

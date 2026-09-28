@@ -1,12 +1,13 @@
 :root { color-scheme:dark; --bg:#090f19; --surface:#111c2b; --surface2:#142336; --line:#263749; --text:#f2f6fa; --muted:#8ca0b4; --blue:#65b7ff; --green:#4dd5a3; --red:#ff7686; --amber:#ffd080; }
 *{box-sizing:border-box} html{font-family:Inter,Segoe UI,Arial,sans-serif} body{margin:0;background:radial-gradient(circle at 88% -15%,#173a59 0,transparent 37%),var(--bg);color:var(--text)} .shell{max-width:1540px;margin:auto;padding:0 28px 40px}
+.hidden{display:none!important}
 .topbar{height:86px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:flex;align-items:center;gap:13px}.brand-mark{display:grid;place-items:center;width:41px;height:41px;border-radius:11px;background:linear-gradient(135deg,#68bdff,#2869a8);color:#071421;font-size:30px;font-weight:800}.brand strong,.brand small{display:block}.brand strong{font-size:18px}.brand small{color:var(--muted);font-size:11px;margin-top:2px;letter-spacing:.04em}.top-actions{display:flex;align-items:center;gap:12px}.env-pill,.connection,.count,.blocked-pill{border:1px solid var(--line);border-radius:999px;padding:8px 12px;font-size:11px;font-weight:700;letter-spacing:.06em}.env-pill{color:var(--blue)}.connection{color:var(--muted)}.connection.connected{color:var(--green);border-color:#215f52}.connection.disconnected{color:var(--amber);border-color:#765b32}button{background:#286da6;border:1px solid #4794cd;color:white;border-radius:9px;padding:10px 15px;font-weight:700;cursor:pointer}button:hover{background:#3487c9}button:disabled{opacity:.6;cursor:wait}
 .intro{display:flex;justify-content:space-between;align-items:end;gap:18px;padding:36px 0 22px}.eyebrow{color:var(--blue);font-size:10px;font-weight:800;letter-spacing:.18em;margin:0 0 8px}h1{font-size:clamp(27px,3vw,43px);margin:0 0 8px;letter-spacing:-.035em}h2{font-size:19px;letter-spacing:-.025em;margin:0}.muted{color:var(--muted);font-size:13px;margin:0}.market-chip{display:flex;flex-direction:column;align-items:flex-end;gap:4px}.market-chip span{font-size:10px;color:var(--blue);font-weight:800;letter-spacing:.14em}.market-chip strong{font-size:27px;font-variant-numeric:tabular-nums}.market-chip small{font-size:11px;color:var(--muted)}
 .notice{background:#19314a;border:1px solid #365a7b;border-radius:10px;padding:13px 16px;color:#d3e9fa;font-size:13px;margin:4px 0 22px}.notice.ok{background:#113029;border-color:#226955;color:#b8efd9}.notice.warn{background:#352b1e;border-color:#765c35;color:#ffdfab}.notice.error{background:#39202a;border-color:#814355;color:#ffc6d0}
 .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:0 0 20px}.metric,.section-card,.strategy-bar{background:linear-gradient(160deg,var(--surface2),var(--surface));border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 34px rgba(0,0,0,.12)}.metric{padding:18px 20px;min-height:120px}.metric span,.metric small{display:block;color:var(--muted)}.metric span{font-size:12px;font-weight:650}.metric strong{display:block;font-size:28px;margin:10px 0 6px;letter-spacing:-.035em;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.metric small{font-size:11px}.positive{color:var(--green)!important}.negative{color:var(--red)!important}
 .section-card{margin-bottom:17px;overflow:hidden}.section-head{display:flex;align-items:center;justify-content:space-between;padding:20px 21px 17px}.count{color:var(--muted);padding:6px 10px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:650px}th{text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.09em;padding:13px 20px;background:#0d1724;white-space:nowrap}td{font-size:12px;padding:13px 20px;border-top:1px solid #203042;white-space:nowrap;font-variant-numeric:tabular-nums}tbody tr:hover{background:#1a2b3e}.empty{color:var(--muted);text-align:center;padding:25px}.split{display:grid;grid-template-columns:1fr 1fr;gap:17px}.footnote{font-size:11px;color:var(--muted);padding:0 20px 16px;margin:0}.side-buy{color:var(--green);font-weight:700}.side-sell{color:var(--red);font-weight:700}.strategy-bar{display:flex;align-items:center;justify-content:space-between;padding:18px 21px;gap:20px}.strategy-bar strong,.strategy-bar span:not(.blocked-pill){display:block}.strategy-bar strong{font-size:13px}.strategy-bar span:not(.blocked-pill){font-size:11px;color:var(--muted);margin-top:5px}.blocked-pill{color:var(--amber);border-color:#785b31;background:#392b19}footer{color:#7f91a4;font-size:11px;padding:24px 0;text-align:center}
 @media(max-width:1050px){.metrics{grid-template-columns:repeat(2,1fr)}.split{grid-template-columns:1fr}}@media(max-width:650px){.shell{padding:0 14px 20px}.topbar{height:auto;padding:15px 0;align-items:flex-start;flex-direction:column}.top-actions{width:100%;flex-wrap:wrap}.intro{align-items:flex-start}.market-chip strong{font-size:20px}.metrics{grid-template-columns:1fr 1fr;gap:9px}.metric{padding:13px;min-height:103px}.metric strong{font-size:19px}.strategy-bar{align-items:flex-start;flex-direction:column}}
-.top-actions a{color:var(--blue);font-size:12px;text-decoration:none}.top-actions a:hover{text-decoration:underline}.trade-controls{margin-top:17px}.trade-controls button:disabled{cursor:not-allowed;background:#51402a;border-color:#816236;color:#ffdfab;opacity:1}.control-note{margin:0 21px 18px;color:var(--muted);font-size:12px}.limit-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;padding:0 21px 22px}.limit-grid label{color:var(--muted);font-size:11px;font-weight:650}.limit-grid input{display:block;width:100%;margin-top:7px;background:#0d1724;border:1px solid var(--line);border-radius:8px;padding:10px;color:var(--text);font:inherit;font-size:13px}.limit-grid input:disabled{opacity:1}.top-actions a[hidden]{display:none}@media(max-width:1050px){.limit-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:650px){.limit-grid{grid-template-columns:1fr 1fr}}
+.top-actions a{color:var(--blue);font-size:12px;text-decoration:none}.top-actions a:hover{text-decoration:underline}.trade-controls{margin-top:17px}.trade-controls button:disabled{cursor:not-allowed;background:#51402a;border-color:#816236;color:#ffdfab;opacity:1}.control-note{margin:0 21px 18px;color:var(--muted);font-size:12px}.limit-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;padding:0 21px 22px}.limit-grid label{color:var(--muted);font-size:11px;font-weight:650}.limit-grid input{display:block;width:100%;margin-top:7px;background:#0d1724;border:1px solid var(--line);border-radius:8px;padding:10px;color:var(--text);font:inherit;font-size:13px}.limit-grid input:disabled{opacity:1}.top-actions a[hidden]{display:none}@media(max-width:1200px){.limit-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:650px){.limit-grid{grid-template-columns:1fr 1fr}}
 .control-blockers{margin:0 21px 18px;padding-left:18px;color:var(--amber);font-size:12px;line-height:1.6}.control-blockers li+li{margin-top:3px}
 .ip-pill{border:1px solid #3d5a80;border-radius:999px;padding:8px 12px;font-size:11px;font-weight:700;letter-spacing:.06em;color:#90e0ef;background:#132a40;cursor:pointer}
 .ip-box{background:linear-gradient(135deg,#132235,#1b2e45);border:1px solid #365a7b;border-radius:12px;padding:16px 20px;margin-bottom:18px;display:flex;flex-direction:column;gap:8px}
@@ -406,5 +407,127 @@
   cursor: not-allowed;
   box-shadow: none;
   opacity: 0.65;
+}
+
+/* Utility & CSP-safe classes */
+.hidden { display: none !important; }
+.flex-center-gap { display: flex; gap: 10px; align-items: center; }
+.muted-small { font-size: 12px; }
+.bold-timer { font-weight: 700; }
+.limit-grid-spaced { margin-top: 15px; }
+
+/* Editable Risk Limits & Save Bar */
+.risk-controls-panel {
+  background: #09121d;
+  border: 1px solid #1c2e44;
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin: 0 21px 20px;
+}
+.risk-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.risk-panel-title {
+  font-size: 14px;
+  color: #f2f6fa;
+  font-weight: 700;
+  margin: 0 0 3px;
+}
+.limit-grid input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(101, 183, 255, 0.25);
+  outline: none;
+}
+.risk-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.save-limits-btn {
+  background: linear-gradient(135deg, #1f6cb0, #134673)!important;
+  border: 1px solid #3d8dd5!important;
+  color: #ffffff!important;
+  padding: 10px 18px!important;
+  border-radius: 8px!important;
+  font-size: 13px!important;
+  font-weight: 700!important;
+  cursor: pointer;
+  transition: all .2s;
+  box-shadow: 0 2px 8px rgba(31, 108, 176, 0.35);
+}
+.save-limits-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2784d6, #18568c)!important;
+  box-shadow: 0 4px 14px rgba(39, 132, 214, 0.45);
+}
+.save-limits-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.reset-limits-btn {
+  background: #172638!important;
+  border: 1px solid #2e4a6a!important;
+  color: #a4c2e0!important;
+  padding: 10px 16px!important;
+  border-radius: 8px!important;
+  font-size: 13px!important;
+  font-weight: 700!important;
+  cursor: pointer;
+  transition: all .2s;
+}
+.reset-limits-btn:hover {
+  background: #233b56!important;
+  color: #ffffff!important;
+}
+.save-status-msg {
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all .2s;
+}
+.save-status-msg.ok { color: var(--green); }
+.save-status-msg.err { color: var(--red); }
+
+/* Auto-trading indicator banner */
+.auto-trading-banner {
+  background: linear-gradient(135deg, #0e1e2f, #09131f);
+  border: 1px solid #1e3a5a;
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 16px;
+}
+.auto-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.auto-badge {
+  display: inline-block;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  background: #113426;
+  color: #4dd5a3;
+  border: 1px solid #1f6b50;
+  text-transform: uppercase;
+}
+.auto-banner-text {
+  font-size: 12px;
+  color: #c0d4e7;
+}
+.auto-banner-text strong {
+  color: #f2f6fa;
 }
 
