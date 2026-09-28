@@ -254,6 +254,11 @@ class GTrXLAutomatedTrader:
         self.last_entry_features: Optional[torch.Tensor] = None
         self.last_entry_side: Optional[str] = None
         self.current_bar_features: Optional[torch.Tensor] = None
+        self.consecutive_stop_losses: int = 0
+        self.cooldown_until: Optional[float] = None
+        self.circuit_breaker_active: bool = False
+        self.trend_recheck_status: str = "NORMAL"
+        self.last_trend_analysis: Dict[str, Any] = {}
 
         self.latest_status: Dict[str, Any] = {
             "status": "INITIALIZING",
@@ -277,6 +282,12 @@ class GTrXLAutomatedTrader:
             "last_learning_event": "None",
             "last_failure_analysis": None,
             "last_failure_fix": None,
+            "consecutive_stop_losses": 0,
+            "circuit_breaker_active": False,
+            "cooldown_until": None,
+            "cooldown_remaining_seconds": 0,
+            "trend_recheck_status": "NORMAL",
+            "last_trend_analysis": {},
             "trained_model_loaded": False,
             "scaler_loaded": False,
             "training_metadata": {},
@@ -515,7 +526,50 @@ class GTrXLAutomatedTrader:
                 "risk_status": "OK" if live_enabled else "LIVE_TRADING_PAUSED",
             })
 
-        # 5. Order execution logic
+        # 5. Circuit Breaker Check (2+ Consecutive Stop Losses)
+        now_ts = time.time()
+        cooldown_rem_s = 0
+        if self.circuit_breaker_active and self.cooldown_until is not None:
+            if now_ts < self.cooldown_until:
+                cooldown_rem_s = int(self.cooldown_until - now_ts)
+                self.trend_recheck_status = "COOLDOWN_PAUSE"
+            else:
+                # Cooldown completed! Now recheck the market trend:
+                trend_ok, trend_diag = self.recheck_market_trend(candles)
+                self.last_trend_analysis = trend_diag
+                if trend_ok:
+                    self.log(
+                        f"[TREND RECHECK SUCCESS] Market trend revalidated: {trend_diag.get('summary')}. "
+                        f"Circuit breaker lifted, resuming automated trading."
+                    )
+                    self.circuit_breaker_active = False
+                    self.cooldown_until = None
+                    self.consecutive_stop_losses = 0
+                    self.trend_recheck_status = "TREND_CONFIRMED"
+                else:
+                    self.trend_recheck_status = "TREND_RECHECK_PENDING"
+                    self.log(
+                        f"[TREND RECHECK PENDING] Market structure still uncertain: {trend_diag.get('summary')}. "
+                        f"Holding trade execution until trend cleanly confirms."
+                    )
+
+        if self.circuit_breaker_active:
+            with self._lock:
+                rem_m, rem_s = divmod(cooldown_rem_s, 60)
+                cb_label = f"COOLDOWN ({rem_m}m {rem_s}s)" if cooldown_rem_s > 0 else "TREND_RECHECK_PENDING"
+                self.latest_status["status"] = cb_label
+                self.latest_status["circuit_breaker_active"] = True
+                self.latest_status["consecutive_stop_losses"] = self.consecutive_stop_losses
+                self.latest_status["cooldown_remaining_seconds"] = cooldown_rem_s
+                self.latest_status["trend_recheck_status"] = self.trend_recheck_status
+                self.latest_status["last_trend_analysis"] = self.last_trend_analysis
+                self.latest_status["risk_status"] = (
+                    f"CIRCUIT_BREAKER_ACTIVE: 2+ SL hit ({rem_m}m {rem_s}s wait)"
+                    if cooldown_rem_s > 0 else "CIRCUIT_BREAKER: Trend recheck pending"
+                )
+            return
+
+        # 6. Order execution logic
         if not live_enabled:
             return
 
@@ -673,6 +727,122 @@ class GTrXLAutomatedTrader:
         fixes = {"penalty_weight": 2.0, "boost_hold_weight": 1.5, "cooldown_cycles": 1}
         return reason, explanation, fixes
 
+    def recheck_market_trend(self, candles: Optional[List[Dict[str, Any]]] = None) -> Tuple[bool, Dict[str, Any]]:
+        """Systematic multi-horizon market trend and structure revalidation following a 2+ stop-loss cooldown.
+
+        Validates:
+        1. Multi-EMA structural alignment (Fast EMA 10, Mid EMA 25, Slow EMA 50)
+        2. Volatility normalization (5-bar Parkinson / 20-bar baseline <= 1.25)
+        3. Candle geometry & absorption (no rejection wicks > 35% in last 3 bars)
+        4. RSI healthy corridor (35 <= RSI <= 65, free of momentum exhaustion)
+        5. Trend strength & spread (EMA 10 vs EMA 25 spread >= 0.05%)
+
+        Returns:
+            (is_trend_confirmed, diagnostic_report)
+        """
+        if candles is None or len(candles) < 30:
+            if self.client and "get_candles" in self.client.available_tools():
+                now_ts = int(time.time())
+                symbol = self.strategy_config.get("product_symbol", "ETHUSD")
+                resolution = self.strategy_config.get("bar_resolution", "1m")
+                try:
+                    c_res = self.client.call("get_candles", {
+                        "symbol": symbol,
+                        "resolution": resolution,
+                        "start": now_ts - (50 * 3600),
+                        "end": now_ts,
+                    })
+                    candles = c_res.get("result", c_res) if isinstance(c_res, dict) else c_res
+                except Exception:
+                    pass
+
+        if not candles or len(candles) < 30:
+            return False, {
+                "confirmed": False,
+                "summary": "Insufficient candle history (<30 bars) for multi-horizon trend recheck",
+                "trend_direction": "UNKNOWN",
+            }
+
+        closes = [_safe_float(c.get("close")) for c in candles]
+        highs = [_safe_float(c.get("high")) for c in candles]
+        lows = [_safe_float(c.get("low")) for c in candles]
+        idx = len(closes) - 1
+        eps = 1e-8
+
+        def calc_ema(series: List[float], span: int) -> float:
+            alpha = 2.0 / (span + 1.0)
+            res = series[0]
+            for val in series[1:]:
+                res = alpha * val + (1.0 - alpha) * res
+            return res
+
+        ema10 = calc_ema(closes[-35:], 10)
+        ema25 = calc_ema(closes[-35:], 25)
+        ema50 = calc_ema(closes[-50:], 50)
+        cur_close = closes[-1]
+
+        spread_10_25 = (ema10 - ema25) / (ema25 + eps)
+
+        is_bullish = (ema10 > ema25 > ema50) and (cur_close >= ema25)
+        is_bearish = (ema10 < ema25 < ema50) and (cur_close <= ema25)
+        trend_direction = "BULLISH" if is_bullish else ("BEARISH" if is_bearish else "CHOPPY_SIDEWAYS")
+
+        # Volatility normalization
+        p5 = sum(
+            (math.log(max(highs[i], eps) / max(lows[i], eps)) ** 2) / (4.0 * math.log(2.0))
+            for i in range(idx - 4, idx + 1)
+        ) / 5.0
+        p20 = sum(
+            (math.log(max(highs[i], eps) / max(lows[i], eps)) ** 2) / (4.0 * math.log(2.0))
+            for i in range(idx - 19, idx + 1)
+        ) / 20.0
+        vol_p5 = math.sqrt(max(p5, 0.0))
+        vol_p20 = math.sqrt(max(p20, 0.0))
+        vol_ratio = vol_p5 / (vol_p20 + eps)
+        vol_normalized = vol_ratio <= 1.25
+
+        # 14-period RSI
+        gains = [max(0.0, closes[i] - closes[i - 1]) for i in range(idx - 13, idx + 1)]
+        losses = [max(0.0, closes[i - 1] - closes[i]) for i in range(idx - 13, idx + 1)]
+        rs = (sum(gains) / 14.0) / (sum(losses) / 14.0 + eps)
+        rsi = 100.0 - (100.0 / (1.0 + rs))
+        rsi_healthy = (35.0 <= rsi <= 65.0)
+
+        # Recent wicks
+        recent_clean = True
+        for i in range(idx - 2, idx + 1):
+            h, l, c, o = highs[i], lows[i], closes[i], _safe_float(candles[i].get("open"))
+            rng = h - l + eps
+            if (h - max(o, c)) / rng > 0.35 or (min(o, c) - l) / rng > 0.35:
+                recent_clean = False
+                break
+
+        trend_aligned = is_bullish or is_bearish
+        confirmed = trend_aligned and vol_normalized and (abs(spread_10_25) >= 0.0005)
+
+        summary_parts = [
+            f"Trend: {trend_direction} (Spread: {spread_10_25*100:+.2f}%)",
+            f"Vol Ratio: {vol_ratio:.2f} ({'NORMALIZED' if vol_normalized else 'HIGH_SHOCK'})",
+            f"RSI: {rsi:.1f} ({'HEALTHY' if rsi_healthy else 'EXTREME'})",
+            f"Wicks: {'CLEAN' if recent_clean else 'REJECTIONS_DETECTED'}",
+        ]
+
+        diag = {
+            "confirmed": confirmed,
+            "trend_direction": trend_direction,
+            "ema10": round(ema10, 2),
+            "ema25": round(ema25, 2),
+            "ema50": round(ema50, 2),
+            "spread_10_25": round(spread_10_25, 5),
+            "parkinson_ratio_5_20": round(vol_ratio, 3),
+            "rsi": round(rsi, 2),
+            "volatility_normalized": vol_normalized,
+            "recent_wicks_clean": recent_clean,
+            "summary": " · ".join(summary_parts),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        return confirmed, diag
+
     def learn_from_trade_failure(self, exit_pnl: float, side: str, entry_feat: Optional[torch.Tensor]) -> Dict[str, Any]:
         """Autonomous online reinforcement learning adaptation & Root Cause Self-Fixer
         triggered upon adverse trade or stop-loss hit."""
@@ -708,6 +878,23 @@ class GTrXLAutomatedTrader:
         if "cooldown_cycles" in fixes:
             cooldown_mins = fixes["cooldown_cycles"] * 5
             applied_fixes.append(f"Activated {cooldown_mins}m volatility cooldown to avoid revenge trading")
+
+        # Circuit Breaker Check: If >= 2 consecutive stop-losses hit, force cooling-off period
+        self.consecutive_stop_losses += 1
+        consecutive_limit = int(self.strategy_config.get("risk_limits", {}).get("consecutive_sl_limit", 2))
+        cooldown_mins = int(self.strategy_config.get("risk_limits", {}).get("consecutive_sl_cooldown_minutes", 30))
+
+        if self.consecutive_stop_losses >= consecutive_limit:
+            self.circuit_breaker_active = True
+            self.cooldown_until = time.time() + (cooldown_mins * 60)
+            self.trend_recheck_status = "COOLDOWN_PAUSE"
+            cooldown_time_str = datetime.fromtimestamp(self.cooldown_until, tz=timezone.utc).strftime("%H:%M:%S UTC")
+            cb_msg = (
+                f"🛑 CIRCUIT BREAKER TRIGGERED: {self.consecutive_stop_losses} consecutive SL hits! "
+                f"Halting trading for {cooldown_mins}m until {cooldown_time_str} followed by Trend Recheck"
+            )
+            applied_fixes.append(cb_msg)
+            self.log(f"[CIRCUIT BREAKER] {cb_msg}")
 
         # Persist updated configuration
         try:
@@ -772,6 +959,13 @@ class GTrXLAutomatedTrader:
                     "fix_summary": fix_summary,
                     "online_adaptation_step": self.online_adaptations,
                 }
+                self.latest_status["consecutive_stop_losses"] = self.consecutive_stop_losses
+                self.latest_status["circuit_breaker_active"] = self.circuit_breaker_active
+                self.latest_status["cooldown_until"] = (
+                    datetime.fromtimestamp(self.cooldown_until, tz=timezone.utc).isoformat()
+                    if self.cooldown_until else None
+                )
+                self.latest_status["trend_recheck_status"] = self.trend_recheck_status
 
             return {
                 "status": "success",
@@ -831,9 +1025,21 @@ class GTrXLAutomatedTrader:
         abs_size = abs(size)
         self.log(f"Closing position of {size} lots with {opposing_side.upper()} {abs_size} lots...")
         ok = self._place_order(symbol, side=opposing_side, size=abs_size)
-        if ok and unrealized_pnl < 0:
-            entry_side = "buy" if size > 0 else "sell"
-            self.learn_from_trade_failure(exit_pnl=unrealized_pnl, side=entry_side, entry_feat=self.last_entry_features)
+        if ok:
+            if unrealized_pnl < 0:
+                entry_side = "buy" if size > 0 else "sell"
+                self.learn_from_trade_failure(exit_pnl=unrealized_pnl, side=entry_side, entry_feat=self.last_entry_features)
+            else:
+                # Profitable close resets consecutive stop-losses
+                self.consecutive_stop_losses = 0
+                self.circuit_breaker_active = False
+                self.cooldown_until = None
+                self.trend_recheck_status = "NORMAL"
+                with self._lock:
+                    self.latest_status["consecutive_stop_losses"] = 0
+                    self.latest_status["circuit_breaker_active"] = False
+                    self.latest_status["cooldown_until"] = None
+                    self.latest_status["trend_recheck_status"] = "NORMAL"
         return ok
 
     def start(self) -> None:

@@ -1,6 +1,8 @@
 {
   "risk_limits": {
     "per_trade_stop_loss": 300,
-    "confidence_threshold": 0.6
+    "consecutive_sl_limit": 2,
+    "consecutive_sl_cooldown_minutes": 30,
+    "min_trend_spread": 0.0015
   }
 }

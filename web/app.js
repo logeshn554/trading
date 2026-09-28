@@ -688,6 +688,30 @@ function renderGTrXL(trader) {
     }
   }
 
+  // Circuit Breaker & Trend Recheck Render
+  const cbBox = byId('gtrxl-cb-box');
+  const cbCountdown = byId('cb-countdown-badge');
+  const cbDesc = byId('cb-explanation');
+  const cbTrendDiag = byId('cb-trend-diag');
+
+  if (trader.circuit_breaker_active && cbBox) {
+    cbBox.style.display = 'block';
+    const rem = trader.cooldown_remaining_seconds || 0;
+    const m = Math.floor(rem / 60);
+    const s = rem % 60;
+    if (cbCountdown) {
+      cbCountdown.textContent = rem > 0 ? `⏱️ Cooldown Active: ${m}m ${s}s` : '🔍 Rechecking Trend Onwards';
+    }
+    if (cbDesc) {
+      cbDesc.textContent = `${trader.consecutive_stop_losses || 2} consecutive stop-losses triggered. Systematic cool-off enforced to prevent drawdown. Re-evaluating macro trend structure before order entry.`;
+    }
+    if (cbTrendDiag && trader.last_trend_analysis && trader.last_trend_analysis.summary) {
+      cbTrendDiag.textContent = trader.last_trend_analysis.summary;
+    }
+  } else if (cbBox) {
+    cbBox.style.display = 'none';
+  }
+
   if (logsEl && Array.isArray(trader.recent_logs) && trader.recent_logs.length > 0) {
     logsEl.replaceChildren();
     for (const logLine of trader.recent_logs) {
@@ -744,6 +768,39 @@ if (testSlBtn) {
       testSlBtn.textContent = '🛡️ Test Stop-Loss Healing';
     }
   });
+}
+
+async function triggerTrendRecheck(btn) {
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Rechecking…';
+  }
+  try {
+    const res = await fetch('/api/gtrxl/recheck-trend', { method: 'POST' });
+    if (res.ok) {
+      const body = await res.json();
+      if (body.trader) renderGTrXL(body.trader);
+      const confText = body.trend_confirmed ? '✅ Trend Confirmed' : '⚠️ Trend Unconfirmed / Choppy';
+      setNotice(`${confText}: ${body.analysis?.summary || 'Analysis complete'}`, body.trend_confirmed ? 'ok' : 'warn');
+    }
+  } catch (e) {
+    console.error('Trend recheck failed', e);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.id === 'gtrxl-recheck-trend-btn' ? '📈 Recheck Trend' : '🔍 Recheck Trend Onwards';
+    }
+  }
+}
+
+const recheckBtn = byId('gtrxl-recheck-btn');
+if (recheckBtn) {
+  recheckBtn.addEventListener('click', () => triggerTrendRecheck(recheckBtn));
+}
+
+const recheckTrendBtn = byId('gtrxl-recheck-trend-btn');
+if (recheckTrendBtn) {
+  recheckTrendBtn.addEventListener('click', () => triggerTrendRecheck(recheckTrendBtn));
 }
 
 async function refresh(fresh = false) {

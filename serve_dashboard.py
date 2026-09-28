@@ -481,6 +481,32 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             })
             return
 
+        elif parsed.path == "/api/gtrxl/recheck-trend":
+            trend_ok, trend_diag = TRADER.recheck_market_trend()
+            TRADER.last_trend_analysis = trend_diag
+            if trend_ok:
+                TRADER.circuit_breaker_active = False
+                TRADER.cooldown_until = None
+                TRADER.consecutive_stop_losses = 0
+                TRADER.trend_recheck_status = "TREND_CONFIRMED"
+            else:
+                TRADER.trend_recheck_status = "TREND_RECHECK_PENDING"
+
+            with TRADER._lock:
+                TRADER.latest_status["circuit_breaker_active"] = TRADER.circuit_breaker_active
+                TRADER.latest_status["consecutive_stop_losses"] = TRADER.consecutive_stop_losses
+                TRADER.latest_status["trend_recheck_status"] = TRADER.trend_recheck_status
+                TRADER.latest_status["last_trend_analysis"] = trend_diag
+                TRADER.latest_status["status"] = "TREND_CONFIRMED" if trend_ok else "TREND_RECHECK_PENDING"
+
+            self._send_json({
+                "status": "success",
+                "trend_confirmed": trend_ok,
+                "analysis": trend_diag,
+                "trader": TRADER.get_status(),
+            })
+            return
+
         elif parsed.path == "/api/strategy/risk_limits":
             content_len = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_len) if content_len > 0 else b"{}"

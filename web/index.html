@@ -150,6 +150,22 @@
           </div>
         </div>
 
+        <!-- Circuit Breaker & Trend Recheck Banner (2+ Stop Loss Protection) -->
+        <div id="gtrxl-cb-box" class="gtrxl-cb-banner" style="display: none;">
+          <div class="cb-header">
+            <div class="cb-title-row">
+              <span class="cb-tag">2+ STOP LOSS CIRCUIT BREAKER ACTIVE</span>
+              <span id="cb-countdown-badge" class="cb-timer-badge">⏱️ Cooldown Active</span>
+            </div>
+            <button id="gtrxl-recheck-btn" type="button" class="gtrxl-recheck-trigger-btn">🔍 Recheck Trend Onwards</button>
+          </div>
+          <p id="cb-explanation" class="cb-desc">2 consecutive stop-losses triggered. System paused trading to protect capital. Re-evaluating macro market trend...</p>
+          <div class="cb-trend-row">
+            <strong>Market Structure &amp; Trend:</strong>
+            <span id="cb-trend-diag">Checking EMA alignment, Parkinson volatility &amp; RSI corridor...</span>
+          </div>
+        </div>
+
         <div class="gtrxl-control-bar">
           <div class="gtrxl-meta-items">
             <span><strong>Model:</strong> GTrXL (4L, 4H, Rel-MHA + GRUGate)</span>
@@ -159,6 +175,7 @@
           <div class="gtrxl-btn-group">
             <button id="gtrxl-eval-btn" type="button" class="gtrxl-eval-trigger-btn">⚡ Run AI Step</button>
             <button id="gtrxl-test-sl-btn" type="button" class="gtrxl-sl-trigger-btn">🛡️ Test Stop-Loss Healing</button>
+            <button id="gtrxl-recheck-trend-btn" type="button" class="gtrxl-recheck-trigger-btn">📈 Recheck Trend</button>
           </div>
         </div>
 
