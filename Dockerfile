@@ -10,11 +10,13 @@ RUN python -m pip install --no-cache-dir --extra-index-url https://download.pyto
     && useradd --create-home --uid 10001 dashboard
 
 WORKDIR /app
-COPY serve_dashboard.py ./
-COPY ethresearch/ ./ethresearch/
-COPY artifacts/ ./artifacts/
-COPY config/production_strategy.json ./config/
-COPY web/index.html web/app.js web/styles.css ./web/
+COPY --chown=dashboard:dashboard serve_dashboard.py ./
+COPY --chown=dashboard:dashboard ethresearch/ ./ethresearch/
+COPY --chown=dashboard:dashboard artifacts/ ./artifacts/
+COPY --chown=dashboard:dashboard config/ ./config/
+COPY --chown=dashboard:dashboard web/ ./web/
+
+RUN chmod -R 775 /app
 
 USER dashboard
 EXPOSE 10000
