@@ -644,7 +644,20 @@ function renderGTrXL(trader) {
   }
 
   if (memEl) {
-    memEl.textContent = `${trader.memory_bars || 0} Bars`;
+    memEl.textContent = `Recurrent KV-Memory: ${trader.memory_bars || 0} Bars`;
+  }
+
+  const adaptStatEl = byId('gtrxl-adapt-stat');
+  const adaptNoteEl = byId('gtrxl-adapt-note');
+  if (adaptStatEl) {
+    const adapts = trader.online_adaptations || 0;
+    const heals = trader.self_healing_count || 0;
+    adaptStatEl.textContent = (adapts > 0 || heals > 0) ? '🟢 Self-Healed & Adapted' : '🟢 Self-Healing Active';
+  }
+  if (adaptNoteEl) {
+    const adapts = trader.online_adaptations || 0;
+    const heals = trader.self_healing_count || 0;
+    adaptNoteEl.textContent = `${heals} Auto-Fixes · ${adapts} Policy Adaptations`;
   }
 
   if (agentStatusEl) {

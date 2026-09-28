@@ -20,6 +20,9 @@
   },
   "side": "gtrxl_policy_action",
   "entry_gate": "gtrxl_confidence >= 0.60 and abs(flow_6) >= 0.10",
+  "checkpoint_bundle": "artifacts/gtrxl/model_bundle.pkl",
+  "weights_file": "artifacts/gtrxl/gtrxl_model.pt",
+  "scaler_file": "artifacts/gtrxl/scaler.pkl",
   "backtest": {
     "trades": 40,
     "wins": 29,

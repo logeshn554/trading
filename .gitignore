@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 data/immutable/
 *.pkl
+!artifacts/gtrxl/*.pkl
 *.env
 **/*.env
 config.env
