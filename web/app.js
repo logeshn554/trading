@@ -604,6 +604,93 @@ function render(data) {
   }
 
   recalculateSizingAndBalance();
+  if (data.gtrxl_trader) {
+    renderGTrXL(data.gtrxl_trader);
+  }
+}
+
+function renderGTrXL(trader) {
+  if (!trader) return;
+  const signalEl = byId('gtrxl-signal');
+  const confEl = byId('gtrxl-signal-conf');
+  const probsEl = byId('gtrxl-probs');
+  const valEl = byId('gtrxl-val');
+  const memEl = byId('gtrxl-mem');
+  const agentStatusEl = byId('gtrxl-agent-status');
+  const lastStepEl = byId('gtrxl-last-step');
+  const tradesCountEl = byId('gtrxl-trades-count');
+  const logsEl = byId('gtrxl-logs');
+
+  const signal = trader.last_signal || 'HOLD';
+  if (signalEl) {
+    signalEl.textContent = signal;
+    signalEl.className = signal === 'BUY' ? 'signal-buy' : (signal === 'SELL' ? 'signal-sell' : 'signal-hold');
+  }
+
+  if (confEl) {
+    const conf = trader.confidence ? (Number(trader.confidence) * 100).toFixed(1) : '—';
+    confEl.textContent = `Confidence: ${conf}%`;
+  }
+
+  if (probsEl && Array.isArray(trader.action_probs) && trader.action_probs.length === 3) {
+    const [h, l, s] = trader.action_probs.map(p => Math.round(Number(p) * 100));
+    probsEl.textContent = `H: ${h}% · L: ${l}% · S: ${s}%`;
+  }
+
+  if (valEl) {
+    const v = Number(trader.value_estimate) || 0;
+    valEl.textContent = `${v >= 0 ? '+' : ''}${v.toFixed(3)}`;
+    valEl.className = v >= 0 ? 'positive' : 'negative';
+  }
+
+  if (memEl) {
+    memEl.textContent = `${trader.memory_bars || 0} Bars`;
+  }
+
+  if (agentStatusEl) {
+    const status = trader.status || 'ONLINE';
+    agentStatusEl.textContent = `GTrXL ${status}`;
+    agentStatusEl.className = (status === 'RUNNING' || status === 'WARMED_UP') ? 'ready-pill' : 'blocked-pill';
+  }
+
+  if (lastStepEl && trader.last_evaluation_time) {
+    lastStepEl.innerHTML = `<strong>Last Step:</strong> ${time(trader.last_evaluation_time)}`;
+  }
+
+  if (tradesCountEl) {
+    tradesCountEl.textContent = `Trades today: ${trader.trades_today || 0}`;
+  }
+
+  if (logsEl && Array.isArray(trader.recent_logs) && trader.recent_logs.length > 0) {
+    logsEl.replaceChildren();
+    for (const logLine of trader.recent_logs) {
+      const lineDiv = document.createElement('div');
+      lineDiv.className = 'gtrxl-log-line';
+      lineDiv.textContent = logLine;
+      logsEl.append(lineDiv);
+    }
+    logsEl.scrollTop = logsEl.scrollHeight;
+  }
+}
+
+const evalBtn = byId('gtrxl-eval-btn');
+if (evalBtn) {
+  evalBtn.addEventListener('click', async () => {
+    evalBtn.disabled = true;
+    evalBtn.textContent = 'Evaluating…';
+    try {
+      const res = await fetch('/api/gtrxl/evaluate', { method: 'POST' });
+      if (res.ok) {
+        const trader = await res.json();
+        renderGTrXL(trader);
+      }
+    } catch (e) {
+      console.error('Manual evaluate failed', e);
+    } finally {
+      evalBtn.disabled = false;
+      evalBtn.textContent = '⚡ Run AI Step';
+    }
+  });
 }
 
 async function refresh(fresh = false) {

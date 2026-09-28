@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request as UrlRequest, urlopen
 
 from ethresearch.delta_mcp import DeltaMcpClient, DeltaMcpError
+from ethresearch.trader import GTrXLAutomatedTrader
 
 
 ROOT = Path(__file__).resolve().parent
@@ -38,6 +39,7 @@ _lockout_lock = threading.Lock()
 _login_lock = threading.Lock()
 _pending_logins: dict[str, tuple[str, float]] = {}
 CLIENT = DeltaMcpClient(environment=MCP_ENV, allow_trading=STRATEGY.get("live_order_submission_enabled", False))
+TRADER = GTrXLAutomatedTrader(client=CLIENT, strategy_config=STRATEGY)
 _cache_lock = threading.Lock()
 _cache: dict[str, object] = {"at": 0.0, "data": None}
 _cached_ip: str | None = None
@@ -205,6 +207,7 @@ def build_snapshot(client: DeltaMcpClient) -> dict:
         "transactions_after": None, "open_orders": [],
         "realized_pnl_open_positions": {}, "unrealized_pnl_open_positions": {},
         "ticker": None, "errors": {},
+        "gtrxl_trader": TRADER.get_status(),
     }
     tools = client.available_tools()
     if "get_connection_status" in tools:
@@ -339,6 +342,32 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._send_json(snapshot(fresh=fresh))
             except (DeltaMcpError, ValueError) as exc:
                 self._send_json({"error": str(exc), "connection": "unavailable"}, 503)
+        elif parsed.path == "/api/gtrxl/status":
+            try:
+                from ethresearch.gtrxl import GTrXLActorCritic
+                info = {
+                    "status": "ready",
+                    "architecture": "GTrXL (Gated Transformer-XL)",
+                    "framework": "PyTorch",
+                    "components": ["GRUGate", "RelMultiHeadAttention", "GTrXLBlock", "ActorCriticHead", "AuxHorizonHead"],
+                    "horizons": ["30m", "1h", "2h"],
+                    "receptive_field_hours": 50.6,
+                    "default_config": {
+                        "d_in": 32,
+                        "d_model": 128,
+                        "n_heads": 4,
+                        "n_layers": 4,
+                        "mem_len": 128,
+                        "aux_horizons": [1, 4, 12]
+                    }
+                }
+                self._send_json(info)
+            except Exception as e:
+                self._send_json({"status": "error", "error": str(e)}, 500)
+            return
+        elif parsed.path == "/api/gtrxl/signal":
+            self._send_json(TRADER.get_status())
+            return
         elif parsed.path == "/api/my-ip":
             self._send_json({"outbound_ip": get_outbound_ip()})
         elif parsed.path == "/favicon.ico":
@@ -415,6 +444,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             new_state = not STRATEGY.get("live_order_submission_enabled", False)
             STRATEGY["live_order_submission_enabled"] = new_state
             CLIENT.allow_trading = new_state
+            TRADER.strategy_config["live_order_submission_enabled"] = new_state
+            TRADER.log(f"Live automated trading submission toggled to {'ON' if new_state else 'OFF'}")
             try:
                 (ROOT / "config/production_strategy.json").write_text(json.dumps(STRATEGY, indent=2), encoding="utf-8")
             except Exception:
@@ -422,6 +453,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             with _cache_lock:
                 _cache["at"] = 0.0
             self._send_json({"live_orders_enabled": new_state})
+            return
+
+        elif parsed.path == "/api/gtrxl/evaluate":
+            TRADER.evaluate_and_trade()
+            self._send_json(TRADER.get_status())
             return
 
         elif parsed.path == "/api/strategy/risk_limits":
@@ -742,11 +778,13 @@ def run_server(port: int = 8000):
         raise SystemExit("Public dashboard requires Google OAuth, a session secret, and both Delta API credential variables")
     bind = os.environ.get("HOST", "0.0.0.0" if (PUBLIC_MODE or os.environ.get("RENDER")) else "127.0.0.1")
     threading.Thread(target=get_outbound_ip, daemon=True).start()
+    TRADER.start()
     server = ThreadingHTTPServer((bind, port), DashboardHandler)
     print(f"Delta account dashboard listening on {bind}:{port}", flush=True)
     try:
         server.serve_forever()
     finally:
+        TRADER.stop()
         server.server_close()
         CLIENT.close()
 

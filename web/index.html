@@ -102,6 +102,61 @@
         <div class="table-wrap"><table><thead><tr><th>Product</th><th>Side</th><th>Type</th><th>Size</th><th>Limit / stop</th><th>State</th><th>Order ID</th></tr></thead><tbody id="order-rows"><tr><td colspan="7" class="empty">Waiting for account data</td></tr></tbody></table></div>
       </section>
 
+      <!-- GTrXL Autonomous AI Trading Engine Section -->
+      <section class="gtrxl-card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">DEEP RL AGENT · MULTI-HORIZON STREAMING</p>
+            <h2>GTrXL Autonomous Trading Engine</h2>
+          </div>
+          <div class="flex-center-gap">
+            <span id="gtrxl-agent-status" class="ready-pill">GTrXL ONLINE</span>
+          </div>
+        </div>
+
+        <div class="gtrxl-metrics-grid">
+          <div class="calc-card">
+            <span class="calc-label">Live Policy Signal</span>
+            <strong id="gtrxl-signal" class="signal-hold">HOLD</strong>
+            <small class="muted" id="gtrxl-signal-conf">Confidence: —</small>
+          </div>
+          <div class="calc-card">
+            <span class="calc-label">Action Probabilities</span>
+            <strong id="gtrxl-probs">H: — · L: — · S: —</strong>
+            <small class="muted">Hold · Long · Short</small>
+          </div>
+          <div class="calc-card">
+            <span class="calc-label">State Value Estimate V(s)</span>
+            <strong id="gtrxl-val">—</strong>
+            <small class="muted">Expected discounted return</small>
+          </div>
+          <div class="calc-card">
+            <span class="calc-label">Recurrent KV-Memory Depth</span>
+            <strong id="gtrxl-mem">—</strong>
+            <small class="muted">1h Intermediate Bars Context</small>
+          </div>
+        </div>
+
+        <div class="gtrxl-control-bar">
+          <div class="gtrxl-meta-items">
+            <span><strong>Model:</strong> GTrXL (4L, 4H, Rel-MHA + GRUGate)</span>
+            <span><strong>Instrument:</strong> ETHUSD (Delta India)</span>
+            <span id="gtrxl-last-step"><strong>Last Step:</strong> Streaming active</span>
+          </div>
+          <button id="gtrxl-eval-btn" type="button" class="gtrxl-eval-trigger-btn">⚡ Run AI Step</button>
+        </div>
+
+        <div class="gtrxl-log-box">
+          <div class="gtrxl-log-title">
+            <span>Agent Decision &amp; Execution Stream:</span>
+            <span id="gtrxl-trades-count" class="muted">Trades today: 0</span>
+          </div>
+          <div id="gtrxl-logs" class="gtrxl-log-lines">
+            <div class="gtrxl-log-line">[SYSTEM] GTrXL Reinforcement Learning engine attached to Delta India live feed.</div>
+          </div>
+        </div>
+      </section>
+
       <section class="strategy-bar"><div><p class="eyebrow">RESEARCH STRATEGY</p><strong id="strategy-name">EXP_021_023</strong><span id="strategy-reason">Validation status loading…</span></div><span id="strategy-state" class="ready-pill">VALIDATED · LIVE ACTIVE</span></section>
       
       <section class="section-card trade-controls">

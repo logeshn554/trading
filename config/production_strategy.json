@@ -3,8 +3,23 @@
   "exchange": "delta_india",
   "product_symbol": "ETHUSD",
   "bar_resolution": "1h",
-  "side": "sign(flow_6)",
-  "entry_gate": "abs(flow_6) >= 0.10 and (close_location >= 0.55 for long or <= 0.45 for short)",
+  "model_type": "GTrXL_RL",
+  "gtrxl_config": {
+    "d_in": 32,
+    "action_dim": 3,
+    "d_model": 128,
+    "n_heads": 4,
+    "n_layers": 4,
+    "mem_len": 128,
+    "horizons": ["30m", "1h", "2h"],
+    "actions": {
+      "0": "HOLD",
+      "1": "BUY",
+      "2": "SELL"
+    }
+  },
+  "side": "gtrxl_policy_action",
+  "entry_gate": "gtrxl_confidence >= 0.60 and abs(flow_6) >= 0.10",
   "backtest": {
     "trades": 40,
     "wins": 29,

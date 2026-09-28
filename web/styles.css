@@ -531,3 +531,103 @@
   color: #f2f6fa;
 }
 
+/* GTrXL Autonomous AI Trading Panel Styles */
+.gtrxl-card {
+  background: linear-gradient(160deg, #122236, #0c1825);
+  border: 1px solid #1f4770;
+  border-radius: 14px;
+  margin-bottom: 17px;
+  overflow: hidden;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22);
+}
+.gtrxl-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 21px 18px;
+}
+.signal-buy {
+  color: var(--green) !important;
+  text-shadow: 0 0 10px rgba(77, 213, 163, 0.4);
+}
+.signal-sell {
+  color: var(--red) !important;
+  text-shadow: 0 0 10px rgba(255, 118, 134, 0.4);
+}
+.signal-hold {
+  color: #ffd080 !important;
+}
+.gtrxl-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 21px;
+  background: rgba(10, 20, 32, 0.7);
+  border-top: 1px solid #1a334d;
+  border-bottom: 1px solid #1a334d;
+  font-size: 12px;
+  color: var(--muted);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.gtrxl-meta-items {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.gtrxl-meta-items strong {
+  color: var(--text);
+}
+.gtrxl-eval-trigger-btn {
+  background: linear-gradient(135deg, #1a4971, #133552);
+  border: 1px solid #2e78b7;
+  color: #e1f0fc;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .2s;
+}
+.gtrxl-eval-trigger-btn:hover {
+  background: #25669c;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(46, 120, 183, 0.4);
+}
+.gtrxl-log-box {
+  padding: 14px 21px;
+  background: #070e17;
+  font-family: monospace;
+}
+.gtrxl-log-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--blue);
+  margin-bottom: 8px;
+  font-weight: 700;
+  font-family: Inter, sans-serif;
+  display: flex;
+  justify-content: space-between;
+}
+.gtrxl-log-lines {
+  max-height: 120px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #9ac2e6;
+}
+.gtrxl-log-line {
+  line-height: 1.4;
+}
+@media(max-width: 1050px) {
+  .gtrxl-metrics-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media(max-width: 650px) {
+  .gtrxl-metrics-grid { grid-template-columns: 1fr; }
+}
+
+
