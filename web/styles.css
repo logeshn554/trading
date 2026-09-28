@@ -579,6 +579,12 @@
 .gtrxl-meta-items strong {
   color: var(--text);
 }
+.gtrxl-btn-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 .gtrxl-eval-trigger-btn {
   background: linear-gradient(135deg, #1a4971, #133552);
   border: 1px solid #2e78b7;
@@ -594,6 +600,22 @@
   background: #25669c;
   color: #fff;
   box-shadow: 0 0 12px rgba(46, 120, 183, 0.4);
+}
+.gtrxl-sl-trigger-btn {
+  background: linear-gradient(135deg, #3f1920, #270e13);
+  border: 1px solid #732a35;
+  color: #ffb8c2;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .2s;
+}
+.gtrxl-sl-trigger-btn:hover {
+  background: #5a2029;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(220, 53, 69, 0.4);
 }
 .gtrxl-log-box {
   padding: 14px 21px;

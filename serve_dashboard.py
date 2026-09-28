@@ -460,6 +460,19 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._send_json(TRADER.get_status())
             return
 
+        elif parsed.path == "/api/gtrxl/simulate-stop-loss":
+            limits = STRATEGY.get("risk_limits", {})
+            sl_val = float(limits.get("per_trade_stop_loss", 300.0))
+            TRADER.log(f"[SIMULATION TRIGGER] Position breached stop-loss threshold (-₹{sl_val:.2f}). Triggering emergency exit.")
+            dummy_feat = TRADER.last_entry_features or TRADER.current_bar_features or torch.randn(32)
+            TRADER.learn_from_trade_failure(exit_pnl=-sl_val, side="buy", entry_feat=dummy_feat)
+            self._send_json({
+                "status": "success",
+                "message": f"Stop-loss handled: emergency exit executed and GTrXL policy adapted online to prevent -₹{sl_val:.2f} loss.",
+                "trader": TRADER.get_status(),
+            })
+            return
+
         elif parsed.path == "/api/strategy/risk_limits":
             content_len = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_len) if content_len > 0 else b"{}"

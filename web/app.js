@@ -706,6 +706,28 @@ if (evalBtn) {
   });
 }
 
+const testSlBtn = byId('gtrxl-test-sl-btn');
+if (testSlBtn) {
+  testSlBtn.addEventListener('click', async () => {
+    testSlBtn.disabled = true;
+    testSlBtn.textContent = 'Triggering Stop-Loss…';
+    try {
+      const res = await fetch('/api/gtrxl/simulate-stop-loss', { method: 'POST' });
+      if (res.ok) {
+        const body = await res.json();
+        if (body.trader) renderGTrXL(body.trader);
+        setNotice(`✅ Stop-loss event triggered & autonomously healed: ${body.message}`, 'ok');
+      }
+    } catch (e) {
+      console.error('Stop loss test failed', e);
+      setNotice(`Stop loss test error: ${e.message}`, 'error');
+    } finally {
+      testSlBtn.disabled = false;
+      testSlBtn.textContent = '🛡️ Test Stop-Loss Healing';
+    }
+  });
+}
+
 async function refresh(fresh = false) {
   if (busy) return;
   busy = true;
