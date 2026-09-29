@@ -6,6 +6,7 @@ WORKDIR /app
 COPY --chown=dashboard:dashboard serve_dashboard.py ./
 COPY --chown=dashboard:dashboard ethresearch/__init__.py ethresearch/delta_mcp.py ethresearch/crt.py ethresearch/crt_live.py ./ethresearch/
 COPY --chown=dashboard:dashboard config/production_strategy.json ./config/
+COPY --chown=dashboard:dashboard artifacts/crt/backtest.json ./artifacts/crt/backtest.json
 COPY --chown=dashboard:dashboard web/index.html web/app.js web/styles.css ./web/
 RUN mkdir -p /app/runtime/crt && chown -R dashboard:dashboard /app/runtime
 USER dashboard

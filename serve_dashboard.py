@@ -151,10 +151,15 @@ def _pnl_by_asset(positions: list[dict], field: str) -> dict[str, str]:
 
 def build_snapshot(client: DeltaMcpClient) -> dict:
     now = datetime.now(timezone.utc)
+    try:
+        crt_backtest = json.loads((ROOT / "artifacts/crt/backtest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        crt_backtest = None
     result: dict = {
         "as_of": now.isoformat(), "environment": client.environment, "public_mode": PUBLIC_MODE,
         "outbound_ip": get_outbound_ip(),
         "crt": TRADER.get_status(),
+        "crt_backtest": crt_backtest,
         "connection": "unavailable", "wallets": [], "positions": [],
         "fills": [], "fills_after": None, "transactions": [],
         "transactions_after": None, "open_orders": [],

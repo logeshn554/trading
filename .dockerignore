@@ -12,3 +12,6 @@
 !web/index.html
 !web/app.js
 !web/styles.css
+!artifacts/
+!artifacts/crt/
+!artifacts/crt/backtest.json

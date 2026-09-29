@@ -1,0 +1,483 @@
+{
+  "strategy": "CRT_ETHUSD_15M_V1",
+  "generated_at_utc": "2026-09-29T12:11:32.522638+00:00",
+  "rules_source": "ethresearch/crt.py::signal",
+  "signal_source_sha256": "f4b86c23eb456c2ce16a36d055110baa9261d963ae879c45fbb49fab82a410e5",
+  "data": {
+    "symbol": "ETHUSDT",
+    "venue": "Binance spot",
+    "source_type": "proxy; not Delta ETHUSD",
+    "start": "2026-07-01",
+    "end": "2026-09-27",
+    "complete_15m_bars": 8544,
+    "input_files": [
+      {
+        "file": "ETHUSDT-1m-2026-07.zip",
+        "sha256": "1ad273218d6c33fd62515198276f00c0656ae002c0d1d9ab10cca0f5d0f7adc2"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-08.zip",
+        "sha256": "f2f2fe8da85467fb8ec8185e07f16f3af9f4ebcb266633ba494e76ac73c40c0c"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-01.zip",
+        "sha256": "679b07b6cce5dd1ba1fa2fbfddfb9b1bca9dc74748e9373703644fb5a401aea4"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-02.zip",
+        "sha256": "20f9cd0e6ea2950765af2b775f7ef34a05020c8a9680fdd68332d740be7165d9"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-03.zip",
+        "sha256": "b88e3e86da4ba8cdaf5f8ef0b044bd246289214d8724366ce8f9eeb7f452ad13"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-04.zip",
+        "sha256": "dc48a3fcf8dd3df15f655887b583d30ef6913e76e9512de76beefbdc1ca29448"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-05.zip",
+        "sha256": "6e4f222d188731e64415621b0c8176d11124f8dd436580dfdd403f0d85520b91"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-06.zip",
+        "sha256": "b5fb7aa0c9ef2de218472570e0b052debff60fc352c02cb510b4fff1bd293b46"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-07.zip",
+        "sha256": "73e9dd2d38ee179738240dabeb2fac3ffe74bbaebbec90b1d58b3010fe85466e"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-08.zip",
+        "sha256": "97c871d95ae4750a34081e7b5ff7ac52db7775d10412b24fef9fa2d6e99e5b91"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-09.zip",
+        "sha256": "174943ca2129eb59ed096b0c744227d991bbacbf08556b4882077553b42b00d2"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-10.zip",
+        "sha256": "9719c865bc95e10132753182ae6f44344ab5eb221af77e8db954f3099fb9aa35"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-11.zip",
+        "sha256": "23c58d59109754d223083d93994a85c07a38b6c7e125376b15e14144b8ebbf9f"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-12.zip",
+        "sha256": "58542d93f3ce1f41ce94d291361fb124f4de3d198ac38d7ad6262df0f4a5f4d7"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-13.zip",
+        "sha256": "81e7e583ff6f08e683c4705e41f85646c520d0dbbe5579d34bf00db61bad97ab"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-14.zip",
+        "sha256": "378090778fb4d4abc4fbe4e343507e25ab7869890f101718c073c0ccf4ac139f"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-15.zip",
+        "sha256": "bbe69cfc8e7c6d5d430357db94c7c3de9857670ff11900fcc212a26743e5c299"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-16.zip",
+        "sha256": "e8be0c1a44f33b0a87499f3b10ed9282ca32fab78b3f711e0a3bdde9e515408a"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-17.zip",
+        "sha256": "5f59a8a8990bc9a75ad17839b0eaf973d48fa04f71932b9740d6226e849527aa"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-18.zip",
+        "sha256": "18578d9c5d12cf8639232127b226955a3e9d0fb15d1a660b4c666a591fc82de3"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-19.zip",
+        "sha256": "01b99ef9ba17f74dd130d3c0c1ddebe9804f3847c1754666c119b7b2b27c6615"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-20.zip",
+        "sha256": "ca4b4f197d59c8eb45fbd1505e533b6f3c589e42e0d4167bb0d60f0ce7ad7163"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-21.zip",
+        "sha256": "54899e2a932f6fdbd1044b47744e23645cb44d81211de00923110ef5a3c50d5c"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-22.zip",
+        "sha256": "2e9f58624ef6ae2e103b3ffafb2482d58b4c255b9141358ead6b4f88e9c39dbf"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-23.zip",
+        "sha256": "d9d92b425a2fc9ca51960ed29e2af5fb0ddb5b3d8c1f50417cdd008dc244995a"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-24.zip",
+        "sha256": "a064169c707c2988b042efa633bdbe98660008227661af8043e5fc6e807bace7"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-25.zip",
+        "sha256": "910db0e5671517a52c96782bc4fa18b599d8dfac4ae73404f2d5c8d385a3ba96"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-26.zip",
+        "sha256": "8aebc2e57c6297968eeec3803377a4d20618743fd604aa260043607eb124416c"
+      },
+      {
+        "file": "ETHUSDT-1m-2026-09-27.zip",
+        "sha256": "23e3945a9f3eda70a5d26022510bfb833184911aab663b73d9e7631c682102e5"
+      }
+    ],
+    "manifest_ordered_sha256": "50e1e2e9acaf4dacd151f64ee0687c39b106af54dddf83949c4cd3349a050159",
+    "final_input_bar_open_utc": "2026-09-27T23:45:00+00:00"
+  },
+  "protocol": {
+    "test_start": "2026-09-01",
+    "partition_note": "Exploratory chronological partition, not an untouched holdout; no parameter search was run.",
+    "tick": 0.05,
+    "contract_value_eth": 0.01,
+    "contracts": 1,
+    "taker_fee_bps_per_side": 15,
+    "spread_bps_round_trip": 10,
+    "slippage_bps_per_side": 10,
+    "max_trades_per_day": 1,
+    "max_entry_delay_seconds": 90,
+    "entry_model": "signal close adjusted adversely by configured slippage cap",
+    "exit_model": "15m OHLC; stop wins if stop and target both touch in the same candle; gaps at stop fill at open when worse; full opposite-edge target; end of data closes open positions adversely. Entry slippage uses the live cap; exits include configured slippage plus half the round-trip spread estimate.",
+    "spread_validation": "Historical 1m OHLC has no bid/ask. The configured spread cannot be checked against historical quotes and is only included as a modeled exit cost.",
+    "account_inr_conversion": 96.5,
+    "risk_per_trade_inr": 1,
+    "daily_loss_stop_inr": 1,
+    "daily_profit_stop_inr": 1
+  },
+  "results": {
+    "configured_risk_gates": {
+      "statistics": {
+        "closed_trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "breakeven": 0,
+        "win_rate": null,
+        "wilson_95": null,
+        "net_pnl_usd_per_contract": 0,
+        "gross_profit_usd": 0,
+        "gross_loss_usd": 0,
+        "profit_factor": null,
+        "expectancy_usd_per_contract": null,
+        "mean_r": null,
+        "max_drawdown_usd_per_contract": 0.0,
+        "max_consecutive_losses": 0
+      },
+      "skipped_setups": {
+        "signal": 5883,
+        "spread_not_observable": 0,
+        "slippage": 0,
+        "risk_budget": 2659,
+        "collateral": 0,
+        "daily_trade_limit": 0,
+        "daily_stop": 0
+      }
+    },
+    "diagnostic_one_contract_unconstrained_by_inr_risk": {
+      "statistics": {
+        "closed_trades": 89,
+        "wins": 1,
+        "losses": 88,
+        "breakeven": 0,
+        "win_rate": 0.011235955056179775,
+        "wilson_95": [
+          0.001986183228256385,
+          0.060932462115046646
+        ],
+        "net_pnl_usd_per_contract": -10.76022815249986,
+        "gross_profit_usd": 0.054924950500002345,
+        "gross_loss_usd": 10.815153102999863,
+        "profit_factor": 0.00507851807338423,
+        "expectancy_usd_per_contract": -0.12090143991572876,
+        "mean_r": -0.8098982578399873,
+        "max_drawdown_usd_per_contract": 10.760228152499858,
+        "max_consecutive_losses": 61
+      },
+      "skipped_setups": {
+        "signal": 5785,
+        "spread_not_observable": 0,
+        "slippage": 0,
+        "risk_budget": 0,
+        "collateral": 0,
+        "daily_trade_limit": 2517,
+        "daily_stop": 0
+      },
+      "note": "Analytical only; ignores configured per-trade and daily INR stops. Not executable account performance."
+    },
+    "all_diagnostic_one_contract": {
+      "closed_trades": 89,
+      "wins": 1,
+      "losses": 88,
+      "breakeven": 0,
+      "win_rate": 0.011235955056179775,
+      "wilson_95": [
+        0.001986183228256385,
+        0.060932462115046646
+      ],
+      "net_pnl_usd_per_contract": -10.76022815249986,
+      "gross_profit_usd": 0.054924950500002345,
+      "gross_loss_usd": 10.815153102999863,
+      "profit_factor": 0.00507851807338423,
+      "expectancy_usd_per_contract": -0.12090143991572876,
+      "mean_r": -0.8098982578399873,
+      "max_drawdown_usd_per_contract": 10.760228152499858,
+      "max_consecutive_losses": 61
+    },
+    "before_test_start_exploratory": {
+      "closed_trades": 62,
+      "wins": 1,
+      "losses": 61,
+      "breakeven": 0,
+      "win_rate": 0.016129032258064516,
+      "wilson_95": [
+        0.002852867168621827,
+        0.08586720260689992
+      ],
+      "net_pnl_usd_per_contract": -6.7813472208749195,
+      "gross_profit_usd": 0.054924950500002345,
+      "gross_loss_usd": 6.8362721713749215,
+      "profit_factor": 0.008034342273554589,
+      "expectancy_usd_per_contract": -0.10937656807862774,
+      "mean_r": -0.798517422146392,
+      "max_drawdown_usd_per_contract": 6.8362721713749215,
+      "max_consecutive_losses": 61
+    },
+    "test_period_exploratory": {
+      "closed_trades": 27,
+      "wins": 0,
+      "losses": 27,
+      "breakeven": 0,
+      "win_rate": 0.0,
+      "wilson_95": [
+        0,
+        0.12455502974186705
+      ],
+      "net_pnl_usd_per_contract": -3.978880931624941,
+      "gross_profit_usd": 0,
+      "gross_loss_usd": 3.978880931624941,
+      "profit_factor": 0.0,
+      "expectancy_usd_per_contract": -0.14736596043055336,
+      "mean_r": -0.8360320286919467,
+      "max_drawdown_usd_per_contract": 3.9788809316249405,
+      "max_consecutive_losses": 27
+    },
+    "by_side": {
+      "buy": {
+        "closed_trades": 49,
+        "wins": 1,
+        "losses": 48,
+        "breakeven": 0,
+        "win_rate": 0.02040816326530612,
+        "wilson_95": [
+          0.0036116725898252405,
+          0.10693521523391616
+        ],
+        "net_pnl_usd_per_contract": -6.091555274274785,
+        "gross_profit_usd": 0.054924950500002345,
+        "gross_loss_usd": 6.146480224774788,
+        "profit_factor": 0.008936000522480302,
+        "expectancy_usd_per_contract": -0.12431745457703643,
+        "mean_r": -0.8382339088554811,
+        "max_drawdown_usd_per_contract": 6.0915552742747865,
+        "max_consecutive_losses": 33
+      },
+      "sell": {
+        "closed_trades": 40,
+        "wins": 0,
+        "losses": 40,
+        "breakeven": 0,
+        "win_rate": 0.0,
+        "wilson_95": [
+          0,
+          0.08762160119728664
+        ],
+        "net_pnl_usd_per_contract": -4.668672878225075,
+        "gross_profit_usd": 0,
+        "gross_loss_usd": 4.668672878225075,
+        "profit_factor": 0.0,
+        "expectancy_usd_per_contract": -0.11671682195562687,
+        "mean_r": -0.7751870853460072,
+        "max_drawdown_usd_per_contract": 4.668672878225075,
+        "max_consecutive_losses": 40
+      }
+    },
+    "by_ist_session": {
+      "00-06": {
+        "closed_trades": 48,
+        "wins": 1,
+        "losses": 47,
+        "breakeven": 0,
+        "win_rate": 0.020833333333333332,
+        "wilson_95": [
+          0.003687110977510649,
+          0.10899217995251861
+        ],
+        "net_pnl_usd_per_contract": -5.806100552099906,
+        "gross_profit_usd": 0.054924950500002345,
+        "gross_loss_usd": 5.861025502599909,
+        "profit_factor": 0.009371218479707694,
+        "expectancy_usd_per_contract": -0.12096042816874804,
+        "mean_r": -0.808587866638964,
+        "max_drawdown_usd_per_contract": 5.806100552099906,
+        "max_consecutive_losses": 33
+      },
+      "06-12": {
+        "closed_trades": 41,
+        "wins": 0,
+        "losses": 41,
+        "breakeven": 0,
+        "win_rate": 0.0,
+        "wilson_95": [
+          0,
+          0.08566757018443186
+        ],
+        "net_pnl_usd_per_contract": -4.9541276003999535,
+        "gross_profit_usd": 0,
+        "gross_loss_usd": 4.9541276003999535,
+        "profit_factor": 0.0,
+        "expectancy_usd_per_contract": -0.12083238049755984,
+        "mean_r": -0.8114323743680144,
+        "max_drawdown_usd_per_contract": 4.9541276003999535,
+        "max_consecutive_losses": 41
+      },
+      "12-18": {
+        "closed_trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "breakeven": 0,
+        "win_rate": null,
+        "wilson_95": null,
+        "net_pnl_usd_per_contract": 0,
+        "gross_profit_usd": 0,
+        "gross_loss_usd": 0,
+        "profit_factor": null,
+        "expectancy_usd_per_contract": null,
+        "mean_r": null,
+        "max_drawdown_usd_per_contract": 0.0,
+        "max_consecutive_losses": 0
+      },
+      "18-24": {
+        "closed_trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "breakeven": 0,
+        "win_rate": null,
+        "wilson_95": null,
+        "net_pnl_usd_per_contract": 0,
+        "gross_profit_usd": 0,
+        "gross_loss_usd": 0,
+        "profit_factor": null,
+        "expectancy_usd_per_contract": null,
+        "mean_r": null,
+        "max_drawdown_usd_per_contract": 0.0,
+        "max_consecutive_losses": 0
+      }
+    },
+    "by_volatility_quartile": {
+      "low": {
+        "closed_trades": 23,
+        "wins": 0,
+        "losses": 23,
+        "breakeven": 0,
+        "win_rate": 0.0,
+        "wilson_95": [
+          0,
+          0.14311661845042686
+        ],
+        "net_pnl_usd_per_contract": -2.654595550249973,
+        "gross_profit_usd": 0,
+        "gross_loss_usd": 2.654595550249973,
+        "profit_factor": 0.0,
+        "expectancy_usd_per_contract": -0.11541719783695535,
+        "mean_r": -0.8856076040447151,
+        "max_drawdown_usd_per_contract": 2.6545955502499736,
+        "max_consecutive_losses": 23
+      },
+      "medium_low": {
+        "closed_trades": 22,
+        "wins": 0,
+        "losses": 22,
+        "breakeven": 0,
+        "win_rate": 0.0,
+        "wilson_95": [
+          0,
+          0.14865487460862087
+        ],
+        "net_pnl_usd_per_contract": -2.4559592026749644,
+        "gross_profit_usd": 0,
+        "gross_loss_usd": 2.4559592026749644,
+        "profit_factor": 0.0,
+        "expectancy_usd_per_contract": -0.11163450921249839,
+        "mean_r": -0.7532744571047338,
+        "max_drawdown_usd_per_contract": 2.455959202674964,
+        "max_consecutive_losses": 22
+      },
+      "medium_high": {
+        "closed_trades": 22,
+        "wins": 0,
+        "losses": 22,
+        "breakeven": 0,
+        "win_rate": 0.0,
+        "wilson_95": [
+          0,
+          0.14865487460862087
+        ],
+        "net_pnl_usd_per_contract": -2.894874308849962,
+        "gross_profit_usd": 0,
+        "gross_loss_usd": 2.894874308849962,
+        "profit_factor": 0.0,
+        "expectancy_usd_per_contract": -0.13158519585681647,
+        "mean_r": -0.8423351012566783,
+        "max_drawdown_usd_per_contract": 2.8948743088499627,
+        "max_consecutive_losses": 22
+      },
+      "high": {
+        "closed_trades": 22,
+        "wins": 1,
+        "losses": 21,
+        "breakeven": 0,
+        "win_rate": 0.045454545454545456,
+        "wilson_95": [
+          0.00806942762126385,
+          0.21798045838657332
+        ],
+        "net_pnl_usd_per_contract": -2.75479909072496,
+        "gross_profit_usd": 0.054924950500002345,
+        "gross_loss_usd": 2.8097240412249627,
+        "profit_factor": 0.019548165476085892,
+        "expectancy_usd_per_contract": -0.1252181404874982,
+        "mean_r": -0.7549345350354247,
+        "max_drawdown_usd_per_contract": 2.75479909072496,
+        "max_consecutive_losses": 16
+      }
+    }
+  },
+  "skipped_setups": {
+    "signal": 5883,
+    "spread_not_observable": 0,
+    "slippage": 0,
+    "risk_budget": 2659,
+    "collateral": 0,
+    "daily_trade_limit": 0,
+    "daily_stop": 0
+  },
+  "capital_feasibility": {
+    "available_usd_assumption": 0.6362639395,
+    "latest_close_usd": 2688.65,
+    "one_contract_notional_usd_approx": 26.8865,
+    "one_contract_notional_inr_approx": 2594.54725,
+    "available_collateral_covers_one_contract": false,
+    "note": "Indicative notional check only; no exchange margin, liquidation, balance movement, funding or actual fills modeled."
+  },
+  "validation_gaps": [
+    "Binance ETHUSDT spot proxy, not Delta ETHUSD historical prices",
+    "OHLC simulation does not validate IOC fills, latency, exchange bracket/OCO or partial-fill protection",
+    "Fees, spread, slippage and USD/INR are user-configurable approximations",
+    "No live orders were placed; results do not establish profitable expectancy or a 90% win rate."
+  ]
+}

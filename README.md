@@ -53,10 +53,18 @@ If protection cannot be confirmed, inspect the exchange position and protective 
 
 ## Verification
 
+Recreate the chronological research report from the checksummed local Binance archive:
+
+`python scripts/backtest_crt.py --available-usd 0.6362639395`
+
+The one-contract diagnostic is separate from the configured risk/collateral result. The current $0.6363 account balance cannot cover the approximately $26.89 full notional of one ETHUSD contract at the final proxy close; configured executable trades are therefore zero. On this run, the ₹1 per-trade risk gate also rejected the candidate entries. Update `--available-usd` to the account’s current available USD when rerunning. A one-contract risk limit must be calibrated to the stop distance and contract size to permit any signal.
+
+This archive ends September 27, 2026. It is Binance ETHUSDT spot, not Delta ETHUSD. The September partition is an exploratory chronological comparison, not a previously untouched holdout. In this run, the diagnostic one-contract simulation closed 89 trades, won 1 (1.1%), and lost $10.7602 net per contract under the configured cost assumptions. The configured risk and collateral profile executed zero simulated trades. These results do not demonstrate a viable strategy, 90% wins, or Delta execution behavior. Inspect `artifacts/crt/backtest.json` and `artifacts/crt/trades.csv` for the full report and ledger.
+
 Run: python -m unittest discover -s tests -p test_crt.py -v
 Run: node --check web/app.js
 
-Tests use a fake exchange and cover causal long/short signals, invalid candles, entry expiry, duplicate prevention, restart, uncertain submission, daily loss, transaction costs, and route authentication. They do not prove exchange fills, bracket/OCO behavior, partial-fill protection, slippage, Google login end-to-end, or profitability. No CRT backtest or live winning percentage is claimed.
+The deterministic backtest shares `ethresearch/crt.py::signal`, verifies the input archive against SHA256 entries in its manifest, aggregates only complete consecutive 15-minute bars, models costs, and resolves same-candle stop/target ambiguity stop-first. It still cannot prove exchange fills, bid/ask history, bracket/OCO behavior, partial-fill protection, exact account fees, or profitability. No live CRT winning percentage is claimed.
 
 Official API reference: https://docs.delta.exchange/ (order brackets, client-order lookup, contract specification and wallet transactions).
 
