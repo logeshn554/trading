@@ -19,6 +19,13 @@ SETTINGS = dict(max_trades_per_day=5, max_contracts=1, risk_per_trade_inr=100,
                 daily_profit_inr=500, daily_loss_inr=500, quote_to_inr=85,
                 fee_bps_per_side=6, max_spread_bps=10, max_slippage_bps=10)
 
+# Delta-accurate order representations.
+# Delta uses order_type="market_order" and stop_order_type to classify bracket orders.
+DELTA_SL_ORDER = dict(product_id=3136, side='sell', order_type='market_order',
+                      stop_order_type='stop_loss_order', size=1, stop_price='89.95')
+DELTA_TP_ORDER = dict(product_id=3136, side='sell', order_type='market_order',
+                      stop_order_type='take_profit_order', size=1, stop_price='120')
+
 
 class FakeClient:
     allow_trading = True
@@ -67,6 +74,25 @@ class FakeClient:
                 result['average_fill_price'] = str(self._avg_fill_price)
             data = result
         elif name == 'place_bracket_order':
+            # Validate payload matches Delta's documented MCP schema.
+            if not isinstance(args, dict):
+                raise ValueError('place_bracket_order requires a dict payload')
+            if 'product_id' not in args:
+                raise ValueError('place_bracket_order requires product_id')
+            if 'stop_loss_order' not in args or not isinstance(args['stop_loss_order'], dict):
+                raise ValueError('place_bracket_order requires nested stop_loss_order object')
+            if 'take_profit_order' not in args or not isinstance(args['take_profit_order'], dict):
+                raise ValueError('place_bracket_order requires nested take_profit_order object')
+            sl = args['stop_loss_order']
+            tp = args['take_profit_order']
+            if sl.get('order_type') not in ('market_order', 'limit_order'):
+                raise ValueError('stop_loss_order.order_type must be market_order or limit_order')
+            if 'stop_price' not in sl:
+                raise ValueError('stop_loss_order requires stop_price')
+            if tp.get('order_type') not in ('market_order', 'limit_order'):
+                raise ValueError('take_profit_order.order_type must be market_order or limit_order')
+            if 'stop_price' not in tp:
+                raise ValueError('take_profit_order requires stop_price')
             self._place_bracket_calls.append(args)
             data = {'success': True}
         else: raise AssertionError(name)
@@ -172,7 +198,11 @@ class EngineTests(unittest.TestCase):
 
 
 class ProtectionTests(unittest.TestCase):
-    """Tests for continuous bracket verification and circuit breaker."""
+    """Tests for continuous bracket verification and circuit breaker.
+
+    Order representations use Delta's real schema:
+      order_type="market_order", stop_order_type="stop_loss_order"/"take_profit_order"
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -185,11 +215,11 @@ class ProtectionTests(unittest.TestCase):
         self.engine.stop(); self.clock.stop(); self.tmp.cleanup()
 
     def test_position_with_brackets_is_protected(self):
-        """Active position with matching SL/TP orders stays in normal state."""
+        """Active position with matching SL/TP orders (Delta schema) stays in normal state."""
         self.client.positions = [dict(size=1, product_id=3136)]
         self.client.open_orders = [
-            dict(product_id=3136, side='sell', order_type='stop_market_order', size=1, stop_price='89.95'),
-            dict(product_id=3136, side='sell', order_type='take_profit_order', size=1, take_profit_price='120'),
+            copy.deepcopy(DELTA_SL_ORDER),
+            copy.deepcopy(DELTA_TP_ORDER),
         ]
         self.engine.enabled = True
         self.engine.step()
@@ -211,9 +241,7 @@ class ProtectionTests(unittest.TestCase):
     def test_position_missing_stop_triggers_circuit_breaker(self):
         """Position with TP but no SL is still unprotected."""
         self.client.positions = [dict(size=1, product_id=3136)]
-        self.client.open_orders = [
-            dict(product_id=3136, side='sell', order_type='take_profit_order', size=1, take_profit_price='120'),
-        ]
+        self.client.open_orders = [copy.deepcopy(DELTA_TP_ORDER)]
         self.engine.enabled = True
         self.engine.step()
         self.assertEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
@@ -222,16 +250,42 @@ class ProtectionTests(unittest.TestCase):
     def test_position_missing_tp_triggers_circuit_breaker(self):
         """Position with SL but no TP is still unprotected."""
         self.client.positions = [dict(size=1, product_id=3136)]
+        self.client.open_orders = [copy.deepcopy(DELTA_SL_ORDER)]
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
+        self.assertFalse(self.engine.enabled)
+
+    def test_wrong_order_type_without_stop_order_type_is_not_protective(self):
+        """Orders using fabricated order_types instead of stop_order_type are not recognized."""
+        self.client.positions = [dict(size=1, product_id=3136)]
+        # These use the WRONG schema (stop_market_order/take_profit_order as order_type).
+        # The verifier should NOT recognize these as protective.
         self.client.open_orders = [
             dict(product_id=3136, side='sell', order_type='stop_market_order', size=1, stop_price='89.95'),
+            dict(product_id=3136, side='sell', order_type='take_profit_order', size=1, stop_price='120'),
         ]
         self.engine.enabled = True
         self.engine.step()
         self.assertEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
         self.assertFalse(self.engine.enabled)
 
-    def test_bracket_recovery_with_place_bracket_order(self):
-        """Successful bracket recovery using place_bracket_order."""
+    def test_same_side_orders_do_not_protect(self):
+        """Orders on the same side as the position do not count as protection."""
+        self.client.positions = [dict(size=1, product_id=3136)]  # Long position.
+        # Protective orders on wrong side (buy instead of sell).
+        self.client.open_orders = [
+            dict(product_id=3136, side='buy', order_type='market_order',
+                 stop_order_type='stop_loss_order', size=1, stop_price='89.95'),
+            dict(product_id=3136, side='buy', order_type='market_order',
+                 stop_order_type='take_profit_order', size=1, stop_price='120'),
+        ]
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
+
+    def test_bracket_recovery_sends_correct_delta_payload(self):
+        """Bracket recovery uses Delta's nested stop_loss_order/take_profit_order format."""
         self.client.positions = [dict(size=1, product_id=3136, entry_price='110')]
         self.client.open_orders = []  # Missing protection initially.
         self.client._place_bracket_available = True
@@ -245,26 +299,51 @@ class ProtectionTests(unittest.TestCase):
                                ('test-recovery', '2026-01-01', payload, None, 'ACKNOWLEDGED'))
         self.engine.db.commit()
 
-        # After place_bracket_order is called, simulate bracket orders appearing.
+        # After place_bracket_order is called, simulate Delta-format bracket orders appearing.
         original_call = self.client.call
-        call_count = [0]
         def patched_call(name, args=None):
             result = original_call(name, args)
             if name == 'place_bracket_order':
-                # Simulate brackets now existing after recovery.
                 self.client.open_orders = [
-                    dict(product_id=3136, side='sell', order_type='stop_market_order', size=1, stop_price='89.95'),
-                    dict(product_id=3136, side='sell', order_type='take_profit_order', size=1, take_profit_price='120'),
+                    copy.deepcopy(DELTA_SL_ORDER),
+                    copy.deepcopy(DELTA_TP_ORDER),
                 ]
             return result
         self.client.call = patched_call
 
         self.engine.step()
-        # Recovery should have been attempted and succeeded.
+
+        # Verify recovery was attempted.
         self.assertEqual(len(self.client._place_bracket_calls), 1)
+
+        # Verify the payload matches Delta's documented schema.
+        call_args = self.client._place_bracket_calls[0]
+        self.assertEqual(call_args['product_id'], 3136)
+        self.assertIn('stop_loss_order', call_args)
+        self.assertIn('take_profit_order', call_args)
+        self.assertIsInstance(call_args['stop_loss_order'], dict)
+        self.assertIsInstance(call_args['take_profit_order'], dict)
+        self.assertEqual(call_args['stop_loss_order']['order_type'], 'market_order')
+        self.assertEqual(call_args['stop_loss_order']['stop_price'], '89.95')
+        self.assertEqual(call_args['take_profit_order']['order_type'], 'market_order')
+        self.assertEqual(call_args['take_profit_order']['stop_price'], '120')
+
+        # Verify recovery succeeded.
         self.assertTrue(self.engine.status.get('protection_verified'))
         self.assertTrue(self.engine.enabled)
         self.assertIn('recovered', self.engine.status.get('protection_status', ''))
+
+    def test_bracket_recovery_rejects_flat_payload(self):
+        """FakeClient rejects old-style flat stop_loss_price/take_profit_price payload."""
+        client = FakeClient()
+        client._place_bracket_available = True
+        # This payload uses the WRONG flat format.
+        with self.assertRaises(ValueError):
+            client.call('place_bracket_order', {
+                'product_id': 3136,
+                'stop_loss_price': '89.95',
+                'take_profit_price': '120',
+            })
 
     def test_bracket_recovery_max_attempts_exhausted(self):
         """After max attempts, recovery stops and circuit breaker stays on."""

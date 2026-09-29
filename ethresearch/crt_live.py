@@ -185,46 +185,38 @@ class CRTTrader:
     def _verify_position_protection(self, positions, orders):
         """Check that every active position has matching SL and TP bracket orders.
 
+        Delta represents protective orders with:
+          order_type: "market_order" or "limit_order"
+          stop_order_type: "stop_loss_order" or "take_profit_order"
+          stop_price: the trigger price
+
         Returns (protected: bool, unprotected_positions: list, details: str).
         """
         active = [p for p in positions if number(p.get('size', 0)) != 0]
         if not active:
             return True, [], 'No active positions'
 
-        # Gather all open bracket/stop/take-profit orders.
-        bracket_orders = []
-        for o in orders:
-            otype = o.get('order_type', '')
-            stop_price = o.get('stop_price') or o.get('bracket_stop_loss_price')
-            tp_price = o.get('take_profit_price') or o.get('bracket_take_profit_price')
-            if otype in ('stop_market_order', 'take_profit_order', 'stop_limit_order',
-                         'take_profit_limit_order') or stop_price or tp_price:
-                bracket_orders.append(o)
-
         unprotected = []
         for pos in active:
             product_id = pos.get('product_id')
-            pos_size = abs(number(pos.get('size', 0)))
             pos_side = 'buy' if number(pos.get('size', 0)) > 0 else 'sell'
 
-            # Check if there are protective orders for this position's product.
             has_stop = False
             has_tp = False
-            protected_size = 0
 
-            for o in bracket_orders:
+            for o in orders:
                 if o.get('product_id') != product_id:
                     continue
                 # A protective order closes the position: opposite side.
                 order_side = o.get('side', '')
                 if order_side == pos_side:
                     continue  # Same side doesn't protect.
-                o_size = abs(number(o.get('size', 0)))
-                otype = o.get('order_type', '')
-                if otype in ('stop_market_order', 'stop_limit_order') or o.get('stop_price'):
+
+                # Delta uses stop_order_type to classify bracket orders.
+                stop_type = o.get('stop_order_type', '')
+                if stop_type == 'stop_loss_order':
                     has_stop = True
-                    protected_size = max(protected_size, o_size)
-                if otype in ('take_profit_order', 'take_profit_limit_order') or o.get('take_profit_price'):
+                elif stop_type == 'take_profit_order':
                     has_tp = True
 
             if not has_stop or not has_tp:
@@ -237,6 +229,10 @@ class CRTTrader:
 
     def _attempt_bracket_recovery(self, unprotected_positions, product):
         """Attempt to place bracket orders on unprotected positions.
+
+        Uses Delta's place_bracket_order with nested stop_loss_order and
+        take_profit_order objects as documented in the MCP interface.
+        Position brackets cover the entire open position; size is not required.
 
         Returns True if recovery succeeds, False otherwise.
         """
@@ -277,8 +273,14 @@ class CRTTrader:
             try:
                 result = self.client.call('place_bracket_order', {
                     'product_id': product_id,
-                    'stop_loss_price': str(sl_price),
-                    'take_profit_price': str(tp_price),
+                    'stop_loss_order': {
+                        'order_type': 'market_order',
+                        'stop_price': str(sl_price),
+                    },
+                    'take_profit_order': {
+                        'order_type': 'market_order',
+                        'stop_price': str(tp_price),
+                    },
                     'bracket_stop_trigger_method': 'last_traded_price',
                 })
                 unwrap(result)

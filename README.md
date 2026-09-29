@@ -22,7 +22,7 @@ Use the included Dockerfile and render.yaml with one instance and the persistent
 Required environment variables:
 - DASHBOARD_PUBLIC=1
 - GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
-- GOOGLE_ALLOWED_EMAIL=logeslogesh.n554@gmail.com
+- GOOGLE_ALLOWED_EMAIL (set in Render environment, not in render.yaml)
 - DASHBOARD_SESSION_SECRET: a random secret at least 32 characters
 - DELTA_API_KEY and DELTA_API_SECRET
 - DELTA_MCP_ENV=india_prod (india_testnet for execution validation)
@@ -49,7 +49,7 @@ SQLite intent records are committed before sending. Each setup has one stable cl
 
 Keep the persistent disk and one service instance. The file lock protects processes sharing that directory, not independent deployments with different disks. Do not deploy another copy with the same trading key. Retain state during redeploys. OFF leaves existing exchange exits intact.
 
-If protection cannot be confirmed, inspect the exchange position and protective orders immediately. The current implementation halts and reports uncertainty; it does not guarantee automated emergency liquidation or bracket repair. External cancellation of protective orders is not automatically repaired. These are material production validation gaps.
+If protection cannot be confirmed, inspect the exchange position and protective orders immediately. The current implementation continuously verifies that every active position has both a stop-loss and take-profit bracket order (using Delta's stop_order_type field). If external cancellation or absence of protective orders is detected, automatic bracket recovery is attempted up to three times using Delta's place_bracket_order with the nested stop_loss_order/take_profit_order MCP format. If recovery fails or max attempts are exhausted, the engine enters UNPROTECTED_POSITION state: all new entries are disabled and the operator must inspect Delta and re-arm manually. This is fail-safe but not guaranteed to handle every exchange edge case; validate on testnet before production.
 
 ## Verification
 
