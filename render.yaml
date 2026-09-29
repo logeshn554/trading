@@ -5,7 +5,16 @@ services:
     plan: starter
     healthCheckPath: /health
     autoDeployTrigger: commit
+    numInstances: 1
+    disk:
+      name: crt-state
+      mountPath: /app/runtime
+      sizeGB: 1
     envVars:
+      - key: CRT_STATE_DIR
+        value: /app/runtime/crt
+      - key: CRT_LIVE_ENABLED
+        value: "0"
       - key: DASHBOARD_PUBLIC
         value: "1"
       - key: GOOGLE_ALLOWED_EMAIL

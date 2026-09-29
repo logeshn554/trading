@@ -3,7 +3,6 @@ __pycache__/
 .pytest_cache/
 data/immutable/
 *.pkl
-!artifacts/gtrxl/*.pkl
 *.env
 **/*.env
 config.env
@@ -11,3 +10,6 @@ _deps_backup/
 reports/
 data/
 .delta-exchange-mcp/
+
+runtime/
+*.pt

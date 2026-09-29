@@ -1,19 +1,17 @@
 {
-  "strategy_id": "gtrxl_ethm_1m_production",
+  "strategy_id": "CRT_ETHUSD_15M_V1",
   "product_symbol": "ETHUSD",
-  "bar_resolution": "1m",
-  "enabled": true,
+  "bar_resolution": "15m",
+  "live_order_submission_enabled": false,
   "risk_limits": {
-    "max_lots_per_trade": 1,
-    "max_trades_per_day": 50,
-    "per_trade_stop_loss": 300.0,
-    "per_trade_take_profit": 600.0,
-    "confidence_threshold": 0.55,
-    "min_trend_spread": 0.0015,
-    "consecutive_sl_limit": 2,
-    "consecutive_sl_cooldown_minutes": 30
-  },
-  "backtest": {
-    "selection_pass": true
+    "max_trades_per_day": null,
+    "max_contracts": null,
+    "risk_per_trade_inr": null,
+    "daily_profit_inr": null,
+    "daily_loss_inr": null,
+    "quote_to_inr": null,
+    "fee_bps_per_side": null,
+    "max_spread_bps": null,
+    "max_slippage_bps": null
   }
 }

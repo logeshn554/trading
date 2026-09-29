@@ -18,7 +18,7 @@ READ_TOOLS = frozenset({
     "get_connection_status", "get_ticker", "get_recent_trades", "get_candles",
     "get_product", "get_wallet_balances",
     "get_margined_positions", "get_wallet_transactions", "get_fills",
-    "get_open_orders", "save_credentials", "setup_credentials",
+    "get_open_orders", "get_order_by_id", "save_credentials", "setup_credentials",
 })
 
 TRADE_TOOLS = frozenset({
@@ -66,6 +66,7 @@ class DeltaMcpClient:
         self._proc: subprocess.Popen[str] | None = None
         self._next_id = 0
         self._tools: set[str] = set()
+        self._schemas: dict[str, dict] = {}
 
     def _sync_config_file(self) -> None:
         api_key = os.environ.get("DELTA_API_KEY", "").strip()
@@ -110,6 +111,7 @@ class DeltaMcpClient:
         })
         self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         listed = self._exchange("tools/list", {})
+        self._schemas = {item['name']: item.get('inputSchema', {}) for item in listed.get('tools', [])}
         self._tools = {item.get("name") for item in listed.get("tools", [])
                        if isinstance(item, dict) and isinstance(item.get("name"), str)}
 
@@ -129,6 +131,7 @@ class DeltaMcpClient:
                     }
                 })
                 relisted = self._exchange("tools/list", {})
+                self._schemas = {item['name']: item.get('inputSchema', {}) for item in relisted.get('tools', [])}
                 self._tools = {item.get("name") for item in relisted.get("tools", [])
                                if isinstance(item, dict) and isinstance(item.get("name"), str)}
             except Exception:
@@ -193,6 +196,11 @@ class DeltaMcpClient:
         with self._lock:
             self._start()
             return set(self._tools)
+
+    def tool_schema(self, name: str) -> dict:
+        with self._lock:
+            self._start()
+            return dict(self._schemas.get(name, {}))
 
     def save_credentials(self, api_key: str, api_secret: str, grant: str = "read") -> bool:
         """Saves Delta API credentials into the MCP session and configuration file."""
