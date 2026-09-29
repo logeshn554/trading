@@ -42,6 +42,7 @@ def signal(rows, now, tick):
         return dict(base, side='hold', reason='Requires exactly one sweep and a close strictly inside the range')
     side = 'buy' if low else 'sell'
     stop = (math.floor(sweep['low'] / tick) - 1) * tick if low else (math.ceil(sweep['high'] / tick) + 1) * tick
+    stop = round(stop, 8)
     target = reference['high'] if low else reference['low']
     return dict(base, side=side, reason='Confirmed low sweep' if low else 'Confirmed high sweep',
                 entry=sweep['close'], stop=stop, target=target,

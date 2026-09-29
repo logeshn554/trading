@@ -114,24 +114,97 @@ class SignalTests(unittest.TestCase):
         s=signal(ROWS,1801,.05)
         self.assertEqual(s['side'],'buy'); self.assertEqual(s['target'],120)
         self.assertAlmostEqual(s['stop'],89.95)
+
     def test_short(self):
         rows=copy.deepcopy(ROWS); rows[1].update(high=130,low=105)
         s=signal(rows,1801,.05)
         self.assertEqual(s['side'],'sell'); self.assertEqual(s['target'],100)
+
     def test_double_sweep_and_boundary_close_skip(self):
+        # Double sweep: both high and low swept
         rows=copy.deepcopy(ROWS); rows[1]['high']=130
         self.assertEqual(signal(rows,1801,.05)['side'],'hold')
+        # Boundary close at reference low (100)
         rows[1]['high']=115; rows[1]['close']=100
         self.assertEqual(signal(rows,1801,.05)['side'],'hold')
+        # Boundary close at reference high (120)
+        rows[1]['high']=120; rows[1]['close']=120
+        self.assertEqual(signal(rows,1801,.05)['side'],'hold')
+
+    def test_close_outside_reference_range_skip(self):
+        # Close below reference low
+        rows=copy.deepcopy(ROWS); rows[1]['close']=95
+        self.assertEqual(signal(rows,1801,.05)['side'],'hold')
+        # Close above reference high (120)
+        rows[1]['high']=125; rows[1]['close']=121
+        self.assertEqual(signal(rows,1801,.05)['side'],'hold')
+
     def test_no_forming_or_late_entries(self):
+        # Forming candle (now is before sweep closes)
         self.assertEqual(signal(ROWS,1799,.05)['side'],'hold')
+        # Expired (91 seconds after sweep closes)
         self.assertEqual(signal(ROWS,1891,.05)['side'],'hold')
+        # Future candle being ignored (no lookahead bias)
         future=dict(time=1800,open=110,high=500,low=1,close=300)
         self.assertEqual(signal(ROWS+[future],1801,.05),signal(ROWS,1801,.05))
+
+    def test_missing_and_misaligned_candles(self):
+        # Missing candle (gap > 900s)
+        gap_rows = [ROWS[0], dict(time=2700, open=112, high=115, low=90, close=110)]
+        self.assertEqual(signal(gap_rows, 3601, .05)['side'], 'hold')
+        # Misaligned candle timestamp (not divisible by 900)
+        misaligned = [dict(time=100, open=100, high=110, low=90, close=105)]
+        with self.assertRaises(ValueError):
+            closed_candles(misaligned, 2000)
+
+    def test_duplicate_candle_rejected(self):
+        with self.assertRaises(ValueError):
+            closed_candles(ROWS + [ROWS[1]], 1801)
+
     def test_bad_data_rejected(self):
-        with self.assertRaises(ValueError): closed_candles(ROWS+ROWS,1801)
-        rows=copy.deepcopy(ROWS);rows[1]['close']=float('nan')
-        with self.assertRaises(ValueError): closed_candles(rows,1801)
+        # Malformed OHLC (high < low)
+        bad_ohlc = [dict(time=0, open=100, high=90, low=110, close=100)]
+        with self.assertRaises(ValueError):
+            closed_candles(bad_ohlc, 1801)
+        # Negative prices
+        neg_price = [dict(time=0, open=-100, high=110, low=-120, close=100)]
+        with self.assertRaises(ValueError):
+            closed_candles(neg_price, 1801)
+        # NaN / inf
+        rows=copy.deepcopy(ROWS); rows[1]['close']=float('nan')
+        with self.assertRaises(ValueError):
+            closed_candles(rows, 1801)
+        rows[1]['close']=float('inf')
+        with self.assertRaises(ValueError):
+            closed_candles(rows, 1801)
+
+    def test_invalid_tick_size_and_rounding(self):
+        with self.assertRaises(ValueError):
+            signal(ROWS, 1801, 0.0)
+        with self.assertRaises(ValueError):
+            signal(ROWS, 1801, -0.05)
+        with self.assertRaises(ValueError):
+            signal(ROWS, 1801, float('nan'))
+
+    def test_target_stop_ordering_and_entry_bounds(self):
+        # For Long: stop < entry < target
+        s_long = signal(ROWS, 1801, .05)
+        self.assertLess(s_long['stop'], s_long['entry'])
+        self.assertLess(s_long['entry'], s_long['target'])
+
+        # For Short: target < entry < stop
+        rows_short = copy.deepcopy(ROWS); rows_short[1].update(high=130, low=105)
+        s_short = signal(rows_short, 1801, .05)
+        self.assertLess(s_short['target'], s_short['entry'])
+        self.assertLess(s_short['entry'], s_short['stop'])
+
+    def test_signal_function_shared_with_backtest_and_live(self):
+        """Prove that live trading and backtesting engines use identical CRT signal logic."""
+        import ethresearch.crt as crt
+        import ethresearch.crt_live as crt_live
+        import ethresearch.backtest as backtest
+        self.assertIs(crt_live.signal, crt.signal)
+        self.assertIs(backtest.signal, crt.signal)
 
 
 class EngineTests(unittest.TestCase):

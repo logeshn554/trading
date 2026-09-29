@@ -4,7 +4,7 @@ RUN python -m pip install --no-cache-dir delta-exchange-mcp==0.7.0 google-auth==
     && useradd --create-home --uid 10001 dashboard
 WORKDIR /app
 COPY --chown=dashboard:dashboard serve_dashboard.py ./
-COPY --chown=dashboard:dashboard ethresearch/__init__.py ethresearch/delta_mcp.py ethresearch/crt.py ethresearch/crt_live.py ./ethresearch/
+COPY --chown=dashboard:dashboard ethresearch/ ./ethresearch/
 COPY --chown=dashboard:dashboard config/production_strategy.json ./config/
 COPY --chown=dashboard:dashboard artifacts/crt/backtest.json ./artifacts/crt/backtest.json
 COPY --chown=dashboard:dashboard web/index.html web/app.js web/styles.css ./web/

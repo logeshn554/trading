@@ -16,6 +16,7 @@ from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
 
 from ethresearch.crt import signal, closed_candles
+from ethresearch.alerts import ALERTS, logger
 
 IST = timezone(timedelta(hours=5, minutes=30))
 LIMITS = ('max_trades_per_day', 'max_contracts', 'risk_per_trade_inr', 'daily_profit_inr',
@@ -41,7 +42,7 @@ def unwrap(value):
 
 
 class CRTTrader:
-    def __init__(self, client, config, state_dir=None):
+    def __init__(self, client, config, state_dir=None, emergency_close_unprotected: bool = False):
         self.client = client
         self.config = copy.deepcopy(config)
         self.root = Path(state_dir or os.environ.get('CRT_STATE_DIR', 'runtime/crt'))
@@ -53,6 +54,7 @@ class CRTTrader:
         self.db = None
         self._bracket_recovery_attempts = 0
         self._max_bracket_recovery_attempts = 3
+        self.emergency_close_unprotected = emergency_close_unprotected
 
     def market(self, tool, args):
         """Public Delta feed works even when the MCP session still needs account login."""
@@ -85,14 +87,42 @@ class CRTTrader:
         if os.name == 'nt':
             import msvcrt
             self.lease.seek(0); self.lease.write(b'0'); self.lease.flush(); self.lease.seek(0)
-            msvcrt.locking(self.lease.fileno(), msvcrt.LK_NBLCK, 1)
+            try:
+                msvcrt.locking(self.lease.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                raise RuntimeError(f'Another CRT bot instance is already active in {self.root}')
         else:
             import fcntl
-            fcntl.flock(self.lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                fcntl.flock(self.lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise RuntimeError(f'Another CRT bot instance is already active in {self.root}')
         self.db = sqlite3.connect(self.root / 'state.sqlite3', check_same_thread=False)
         self.db.execute('PRAGMA synchronous=FULL')
         self.db.execute('CREATE TABLE IF NOT EXISTS intents (id TEXT PRIMARY KEY, day TEXT, payload TEXT, response TEXT, state TEXT)')
         self.db.execute('CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, payload TEXT)')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS trades (
+            setup_id TEXT PRIMARY KEY,
+            signal_timestamp INTEGER,
+            direction TEXT,
+            intended_entry REAL,
+            actual_fills INTEGER,
+            actual_average_entry REAL,
+            actual_exit REAL,
+            actual_average_exit REAL,
+            stop REAL,
+            target REAL,
+            actual_fees REAL,
+            funding REAL,
+            taxes REAL,
+            slippage REAL,
+            realized_pnl REAL,
+            net_pnl REAL,
+            r_multiple REAL,
+            exit_reason TEXT,
+            duration REAL,
+            created_at TEXT
+        )''')
         saved = self.db.execute('SELECT payload FROM settings WHERE id=1').fetchone()
         if saved:
             self.config['risk_limits'] = json.loads(saved[0])
@@ -183,12 +213,13 @@ class CRTTrader:
                 continue  # A missing/failed lookup is not proof that no order was placed.
 
     def _verify_position_protection(self, positions, orders):
-        """Check that every active position has matching SL and TP bracket orders.
+        """Check that every active position has matching SL and TP bracket orders with sufficient quantity.
 
         Delta represents protective orders with:
           order_type: "market_order" or "limit_order"
           stop_order_type: "stop_loss_order" or "take_profit_order"
           stop_price: the trigger price
+          size: contracts to close
 
         Returns (protected: bool, unprotected_positions: list, details: str).
         """
@@ -199,10 +230,11 @@ class CRTTrader:
         unprotected = []
         for pos in active:
             product_id = pos.get('product_id')
+            pos_qty = abs(number(pos.get('size', 0)))
             pos_side = 'buy' if number(pos.get('size', 0)) > 0 else 'sell'
 
-            has_stop = False
-            has_tp = False
+            sl_orders = []
+            tp_orders = []
 
             for o in orders:
                 if o.get('product_id') != product_id:
@@ -215,17 +247,50 @@ class CRTTrader:
                 # Delta uses stop_order_type to classify bracket orders.
                 stop_type = o.get('stop_order_type', '')
                 if stop_type == 'stop_loss_order':
-                    has_stop = True
+                    sl_orders.append(o)
                 elif stop_type == 'take_profit_order':
-                    has_tp = True
+                    tp_orders.append(o)
 
-            if not has_stop or not has_tp:
+            has_stop = len(sl_orders) > 0
+            has_tp = len(tp_orders) > 0
+            sl_qty = sum(number(o.get('size', pos_qty)) for o in sl_orders)
+            tp_qty = sum(number(o.get('size', pos_qty)) for o in tp_orders)
+            qty_protected = (sl_qty >= pos_qty) and (tp_qty >= pos_qty)
+
+            if not has_stop or not has_tp or not qty_protected:
                 unprotected.append(pos)
 
         if unprotected:
-            details = f'{len(unprotected)} position(s) missing SL/TP bracket protection'
+            details = f'{len(unprotected)} position(s) missing SL/TP bracket protection or insufficient protected size'
             return False, unprotected, details
         return True, [], 'All positions have bracket protection'
+
+    def _emergency_close_position(self, pos):
+        """Optional emergency close when protective orders are missing and recovery fails."""
+        if not self.emergency_close_unprotected:
+            return False
+        product_id = pos.get('product_id')
+        pos_size = abs(number(pos.get('size', 0)))
+        if pos_size == 0:
+            return False
+        exit_side = 'sell' if number(pos.get('size', 0)) > 0 else 'buy'
+        try:
+            tools = self.client.available_tools()
+            if 'close_all_positions' in tools:
+                self.client.call('close_all_positions', {})
+            elif 'place_order' in tools:
+                self.client.call('place_order', {
+                    'product_id': product_id,
+                    'size': pos_size,
+                    'side': exit_side,
+                    'order_type': 'market_order',
+                    'time_in_force': 'ioc',
+                })
+            ALERTS.dispatch('EMERGENCY_CLOSE_TRIGGERED', 'CRITICAL', f'Emergency closed unprotected position for product {product_id}')
+            return True
+        except Exception as exc:
+            ALERTS.dispatch('EMERGENCY_CLOSE_FAILED', 'FATAL', f'Emergency close failed: {exc}')
+            return False
 
     def _attempt_bracket_recovery(self, unprotected_positions, product):
         """Attempt to place bracket orders on unprotected positions.
@@ -323,6 +388,79 @@ class CRTTrader:
             'actual_entry_price': actual_entry,
         }
 
+    def _reconcile_closed_trades(self, positions, product, limits, now):
+        """Record closed trades in the durable trades table for verified performance accounting."""
+        active_ids = {p.get('product_id') for p in positions if number(p.get('size', 0)) != 0}
+        unclosed = self.db.execute(
+            "SELECT id, day, payload, response FROM intents WHERE state='ACKNOWLEDGED' AND id NOT IN (SELECT setup_id FROM trades) ORDER BY rowid ASC"
+        ).fetchall()
+        for ident, day, payload_json, resp_json in unclosed:
+            payload = json.loads(payload_json) if payload_json else {}
+            product_id = payload.get('product_id')
+            if product_id in active_ids:
+                continue  # Position is still active on the exchange
+
+            # Position has closed!
+            resp = json.loads(resp_json) if resp_json else {}
+            fill_info = resp.get('_fill_reconciliation', {})
+            direction = payload.get('side', 'buy')
+            buy = direction == 'buy'
+            actual_entry = fill_info.get('actual_entry_price') or number(payload.get('limit_price', 0))
+            actual_fills = fill_info.get('filled_size', number(payload.get('size', 1)))
+            stop = number(payload.get('bracket_stop_loss_price', 0))
+            target = number(payload.get('bracket_take_profit_price', 0))
+            unit = number(product.get('contract_value', 0.01))
+
+            actual_exit = None
+            try:
+                fills = self.client.call('get_fills', {'product_id': product_id, 'page_size': 10})
+                fill_rows = unwrap(fills)
+                if isinstance(fill_rows, list):
+                    exit_side = 'sell' if buy else 'buy'
+                    exit_fills = [f for f in fill_rows if f.get('side') == exit_side]
+                    if exit_fills:
+                        actual_exit = number(exit_fills[0].get('price', target))
+            except Exception:
+                pass
+
+            if actual_exit is None:
+                actual_exit = target
+
+            exit_reason = 'take_profit' if abs(actual_exit - target) <= abs(actual_exit - stop) else 'stop_loss'
+            side_mult = 1 if buy else -1
+            gross_pnl_usd = (actual_exit - actual_entry) * side_mult * unit * actual_fills
+            entry_fee = actual_entry * unit * actual_fills * limits['fee_bps_per_side'] / 10000.0
+            exit_fee = actual_exit * unit * actual_fills * limits['fee_bps_per_side'] / 10000.0
+            actual_fees_usd = entry_fee + exit_fee
+            net_pnl_usd = gross_pnl_usd - actual_fees_usd
+            net_pnl_inr = net_pnl_usd * limits['quote_to_inr']
+
+            risk_per_contract = abs(actual_entry - stop) * unit * limits['quote_to_inr'] + (actual_entry + stop) * limits['fee_bps_per_side'] / 10000.0 * unit * limits['quote_to_inr']
+            initial_risk_inr = risk_per_contract * actual_fills
+            r_multiple = net_pnl_inr / initial_risk_inr if initial_risk_inr > 0 else 0.0
+
+            sig_time = 0
+            if '-' in ident:
+                try:
+                    sig_time = int(ident.split('-')[1])
+                except Exception:
+                    sig_time = int(now)
+            duration = max(0.0, now - sig_time) if sig_time > 0 else 0.0
+
+            self.db.execute(
+                '''INSERT OR IGNORE INTO trades VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (
+                    ident, sig_time, direction, actual_entry, actual_fills, actual_entry,
+                    actual_exit, actual_exit, stop, target, actual_fees_usd, 0.0, 0.0,
+                    abs(actual_entry - number(payload.get('limit_price', actual_entry))),
+                    gross_pnl_usd, net_pnl_inr, r_multiple, exit_reason, duration,
+                    datetime.now(timezone.utc).isoformat()
+                )
+            )
+            self.db.commit()
+            ALERTS.dispatch('TRADE_CLOSED', 'INFO', f'Closed trade {ident}: exit={actual_exit}, net_inr={net_pnl_inr:.2f}, R={r_multiple:.2f}',
+                            {'setup_id': ident, 'net_pnl_inr': net_pnl_inr, 'r_multiple': r_multiple, 'exit_reason': exit_reason})
+
     def step(self, allow_entry=True):
         with self.lock:
             self.initialize()
@@ -414,8 +552,13 @@ class CRTTrader:
                                 self._bracket_recovery_attempts = 0  # Reset only on verified success.
 
                         if not protected:
+                            # Optional emergency close
+                            if self.emergency_close_unprotected:
+                                for unp in unprotected:
+                                    self._emergency_close_position(unp)
                             # Circuit breaker: UNPROTECTED_POSITION state.
                             self.enabled = False
+                            ALERTS.dispatch('UNPROTECTED_POSITION', 'CRITICAL', f'{protection_detail}. Entries disabled.')
                             self.status.update(
                                 state='UNPROTECTED_POSITION',
                                 reason=f'CRITICAL: {protection_detail}. Entries disabled. '
@@ -431,11 +574,13 @@ class CRTTrader:
                     return
                 if not self.enabled or not allow_entry:
                     return
-                # Reset recovery counter when no active positions.
+                # Reset recovery counter and reconcile closed trades when no active positions.
                 self._bracket_recovery_attempts = 0
+                self._reconcile_closed_trades(positions, product, limits, now)
                 if self.db.execute("SELECT 1 FROM intents WHERE state IN ('SUBMITTING','UNKNOWN')").fetchone():
                     raise ValueError('Uncertain previous submission; no new entries')
                 if count >= limits['max_trades_per_day'] or pnl >= limits['daily_profit_inr'] or pnl <= -limits['daily_loss_inr']:
+                    ALERTS.dispatch('DAILY_STOP', 'WARN', 'Daily trade count, profit or loss limit reached')
                     self.status.update(state='DAILY_STOP', reason='Daily trade count, profit or loss limit reached')
                     return
                 if sig['side'] == 'hold':
@@ -493,6 +638,7 @@ class CRTTrader:
                                bracket_stop_trigger_method='last_traded_price', dry_run=False)
                 self.db.execute('INSERT INTO intents VALUES (?,?,?,?,?)', (sig['id'], day, json.dumps(payload), None, 'SUBMITTING'))
                 self.db.commit()  # Persist identity BEFORE any money-changing network call.
+                ALERTS.dispatch('INTENT_CREATED', 'INFO', f'Order intent created: {sig["id"]} {sig["side"]} {size} contracts')
                 try:
                     response = self.client.call('place_order', payload)
                     order = unwrap(response)
@@ -514,6 +660,7 @@ class CRTTrader:
                                         (json.dumps(response_record), 'CANCELLED_UNFILLED', sig['id']))
                         self.db.commit()
                         self.status['reason'] = 'IOC order fully cancelled (zero fill); no position opened'
+                        ALERTS.dispatch('ORDER_CANCELLED', 'INFO', f'IOC order {sig["id"]} fully cancelled (zero fill)')
                         return
 
                     if fill_info['is_partial']:
@@ -524,6 +671,7 @@ class CRTTrader:
                             f"filled {fill_info['filled_size']}, "
                             f"unfilled {fill_info['unfilled_size']}"
                         )
+                        ALERTS.dispatch('PARTIAL_FILL', 'WARN', f'Order {sig["id"]} partially filled: {fill_info["filled_size"]}/{fill_info["requested_size"]}')
 
                     # Compute actual risk from real fill price, not the IOC limit cap.
                     actual_entry = fill_info['actual_entry_price']
@@ -539,10 +687,12 @@ class CRTTrader:
                     self.status['reason'] = 'CRT bracket order acknowledged by Delta'
                     if fill_info['is_partial']:
                         self.status['reason'] += f" (partial fill: {fill_info['filled_size']}/{fill_info['requested_size']})"
+                    ALERTS.dispatch('ORDER_ACKNOWLEDGED', 'INFO', f'Order {sig["id"]} acknowledged by Delta')
                 except Exception:
                     self.db.execute("UPDATE intents SET state='UNKNOWN' WHERE id=?", (sig['id'],))
                     self.db.commit()
                     self.enabled = False
+                    ALERTS.dispatch('ORDER_UNKNOWN', 'CRITICAL', f'Order outcome uncertain for {sig["id"]}')
                     raise ValueError('Order outcome/protection uncertain. Entries OFF; inspect Delta before reconciliation')
             except Exception as exc:
                 self.status.update(state='BLOCKED', error=str(exc), reason=str(exc), daily_net_inr=None)
@@ -554,9 +704,24 @@ class CRTTrader:
                          live_permitted=os.environ.get('CRT_LIVE_ENABLED') == '1', win_rate=None,
                          performance_note='No verified CRT closed-trade performance yet',
                          bracket_recovery_attempts=self._bracket_recovery_attempts,
-                         max_bracket_recovery_attempts=self._max_bracket_recovery_attempts)
+                         max_bracket_recovery_attempts=self._max_bracket_recovery_attempts,
+                         emergency_close_unprotected=self.emergency_close_unprotected)
             if self.db:
                 value['intents'] = [dict(zip(('id','day','payload','response','state'), row)) for row in self.db.execute('SELECT * FROM intents ORDER BY rowid DESC LIMIT 30')]
+                trades = self.db.execute('SELECT setup_id, net_pnl, r_multiple, duration, exit_reason FROM trades ORDER BY rowid DESC').fetchall()
+                if trades:
+                    total_trades = len(trades)
+                    wins = sum(1 for t in trades if t[1] > 0)
+                    win_rate = round(wins / total_trades, 4)
+                    value['win_rate'] = win_rate
+                    value['closed_trades_count'] = total_trades
+                    value['performance_note'] = f"{total_trades} verified closed trade(s), win rate: {win_rate*100:.1f}%"
+                    value['recent_trades'] = [dict(zip(('setup_id', 'net_pnl', 'r_multiple', 'duration', 'exit_reason'), t)) for t in trades[:10]]
+                else:
+                    value['closed_trades_count'] = 0
+                    value['win_rate'] = None
+                    value['performance_note'] = 'No verified CRT closed-trade performance yet'
+                    value['recent_trades'] = []
             return value
 
     def start(self):

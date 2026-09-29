@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crt-trading"
+version = "1.0.0"
+description = "Deterministic Candle Range Theory (CRT) trading engine for Delta Exchange ETHUSD"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+oauth = [
+    "google-auth>=2.20.0",
+]
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --strict-markers"
+markers = [
+    "testnet: integration tests that interact with Delta testnet mock or staging",
+    "fuzz: property and fuzz tests",
+]

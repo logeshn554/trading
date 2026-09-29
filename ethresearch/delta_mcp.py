@@ -76,18 +76,34 @@ class DeltaMcpClient:
             try:
                 from pathlib import Path
                 import stat
+                import tempfile
                 cfg_dir = Path.home() / ".delta-exchange-mcp"
                 cfg_dir.mkdir(parents=True, exist_ok=True)
-                cfg_file = cfg_dir / "config.env"
-                mode = "trade" if self.allow_trading else "read"
-                cfg_file.write_text(
-                    f"DELTA_API_KEY={api_key}\nDELTA_API_SECRET={api_secret}\nDELTA_MCP_ENV={self.environment}\nDELTA_MCP_MODE={mode}\n",
-                    encoding="utf-8"
-                )
-                # Restrict credential file and directory permissions (non-Windows).
                 if os.name != 'nt':
-                    os.chmod(cfg_file, stat.S_IRUSR | stat.S_IWUSR)           # 0o600
-                    os.chmod(cfg_dir, stat.S_IRWXU)                           # 0o700
+                    try:
+                        os.chmod(cfg_dir, stat.S_IRWXU)  # 0o700
+                    except OSError:
+                        pass
+                mode = "trade" if self.allow_trading else "read"
+                content = f"DELTA_API_KEY={api_key}\nDELTA_API_SECRET={api_secret}\nDELTA_MCP_ENV={self.environment}\nDELTA_MCP_MODE={mode}\n"
+                fd, tmp_path = tempfile.mkstemp(dir=str(cfg_dir), prefix="config_", suffix=".tmp")
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    if os.name != 'nt':
+                        try:
+                            os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+                        except OSError:
+                            pass
+                    cfg_file = cfg_dir / "config.env"
+                    os.replace(tmp_path, str(cfg_file))
+                except Exception:
+                    if os.path.exists(tmp_path):
+                        try:
+                            os.unlink(tmp_path)
+                        except OSError:
+                            pass
+                    raise
             except Exception:
                 pass
 
