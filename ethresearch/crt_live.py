@@ -51,6 +51,8 @@ class CRTTrader:
         self.enabled = False  # Every process restart requires explicit arming.
         self.status = {'state': 'OFF', 'reason': 'Live entries disabled', 'candles': [], 'signal': {}}
         self.db = None
+        self._bracket_recovery_attempts = 0
+        self._max_bracket_recovery_attempts = 3
 
     def market(self, tool, args):
         """Public Delta feed works even when the MCP session still needs account login."""
@@ -169,12 +171,155 @@ class CRTTrader:
                 terminal_empty = order.get('state') == 'cancelled' and number(order['unfilled_size']) == number(order['size'])
                 protected = (number(order.get('bracket_stop_loss_price')) == number(sent['bracket_stop_loss_price']) and
                              number(order.get('bracket_take_profit_price')) == number(sent['bracket_take_profit_price'])) if not terminal_empty else False
+                # Reconcile partial fills: record actual filled size for downstream risk accounting.
+                filled_size = number(order['size']) - number(order['unfilled_size']) if not terminal_empty else 0
+                new_state = 'CANCELLED_UNFILLED' if terminal_empty else 'ACKNOWLEDGED'
+                response_record = dict(raw if isinstance(raw, dict) else {}, _reconciled_filled_size=filled_size)
                 if terminal_empty or protected:
                     self.db.execute('UPDATE intents SET state=?,response=? WHERE id=?',
-                                    ('CANCELLED_UNFILLED' if terminal_empty else 'ACKNOWLEDGED', json.dumps(raw), identity))
+                                    (new_state, json.dumps(response_record), identity))
                     self.db.commit()
             except Exception:
                 continue  # A missing/failed lookup is not proof that no order was placed.
+
+    def _verify_position_protection(self, positions, orders):
+        """Check that every active position has matching SL and TP bracket orders.
+
+        Returns (protected: bool, unprotected_positions: list, details: str).
+        """
+        active = [p for p in positions if number(p.get('size', 0)) != 0]
+        if not active:
+            return True, [], 'No active positions'
+
+        # Gather all open bracket/stop/take-profit orders.
+        bracket_orders = []
+        for o in orders:
+            otype = o.get('order_type', '')
+            stop_price = o.get('stop_price') or o.get('bracket_stop_loss_price')
+            tp_price = o.get('take_profit_price') or o.get('bracket_take_profit_price')
+            if otype in ('stop_market_order', 'take_profit_order', 'stop_limit_order',
+                         'take_profit_limit_order') or stop_price or tp_price:
+                bracket_orders.append(o)
+
+        unprotected = []
+        for pos in active:
+            product_id = pos.get('product_id')
+            pos_size = abs(number(pos.get('size', 0)))
+            pos_side = 'buy' if number(pos.get('size', 0)) > 0 else 'sell'
+
+            # Check if there are protective orders for this position's product.
+            has_stop = False
+            has_tp = False
+            protected_size = 0
+
+            for o in bracket_orders:
+                if o.get('product_id') != product_id:
+                    continue
+                # A protective order closes the position: opposite side.
+                order_side = o.get('side', '')
+                if order_side == pos_side:
+                    continue  # Same side doesn't protect.
+                o_size = abs(number(o.get('size', 0)))
+                otype = o.get('order_type', '')
+                if otype in ('stop_market_order', 'stop_limit_order') or o.get('stop_price'):
+                    has_stop = True
+                    protected_size = max(protected_size, o_size)
+                if otype in ('take_profit_order', 'take_profit_limit_order') or o.get('take_profit_price'):
+                    has_tp = True
+
+            if not has_stop or not has_tp:
+                unprotected.append(pos)
+
+        if unprotected:
+            details = f'{len(unprotected)} position(s) missing SL/TP bracket protection'
+            return False, unprotected, details
+        return True, [], 'All positions have bracket protection'
+
+    def _attempt_bracket_recovery(self, unprotected_positions, product):
+        """Attempt to place bracket orders on unprotected positions.
+
+        Returns True if recovery succeeds, False otherwise.
+        """
+        if self._bracket_recovery_attempts >= self._max_bracket_recovery_attempts:
+            return False
+
+        self._bracket_recovery_attempts += 1
+
+        for pos in unprotected_positions:
+            product_id = pos.get('product_id')
+            pos_size = abs(number(pos.get('size', 0)))
+            entry_price = number(pos.get('entry_price', 0))
+
+            if pos_size == 0 or entry_price == 0:
+                continue
+
+            # Look up the last acknowledged intent for this product to get SL/TP.
+            last_intent = self.db.execute(
+                "SELECT payload FROM intents WHERE state='ACKNOWLEDGED' ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            if not last_intent:
+                continue
+
+            intent_payload = json.loads(last_intent[0])
+            if intent_payload.get('product_id') != product_id:
+                continue
+
+            sl_price = intent_payload.get('bracket_stop_loss_price')
+            tp_price = intent_payload.get('bracket_take_profit_price')
+            if not sl_price or not tp_price:
+                continue
+
+            # Check if place_bracket_order is available.
+            tools = self.client.available_tools()
+            if 'place_bracket_order' not in tools:
+                return False
+
+            try:
+                result = self.client.call('place_bracket_order', {
+                    'product_id': product_id,
+                    'stop_loss_price': str(sl_price),
+                    'take_profit_price': str(tp_price),
+                    'bracket_stop_trigger_method': 'last_traded_price',
+                })
+                unwrap(result)
+                return True
+            except Exception:
+                continue
+
+        return False
+
+    def _reconcile_fill_size(self, order_response, sent_payload):
+        """Reconcile actual filled size vs requested size and compute real-fill risk.
+
+        Returns dict with reconciliation details including actual_fill_price.
+        """
+        order = order_response if isinstance(order_response, dict) else {}
+        result_order = order.get('result', order) if isinstance(order, dict) else order
+
+        requested_size = number(sent_payload.get('size', 0))
+        order_size = number(result_order.get('size', requested_size))
+        unfilled = number(result_order.get('unfilled_size', 0))
+        filled_size = order_size - unfilled
+
+        # Use average fill price if available, otherwise fall back to limit price.
+        avg_fill = result_order.get('average_fill_price')
+        if avg_fill is not None:
+            try:
+                actual_entry = number(avg_fill)
+            except (ValueError, TypeError):
+                actual_entry = number(sent_payload.get('limit_price', 0))
+        else:
+            actual_entry = number(sent_payload.get('limit_price', 0))
+
+        return {
+            'requested_size': requested_size,
+            'filled_size': filled_size,
+            'unfilled_size': unfilled,
+            'is_partial': 0 < filled_size < requested_size,
+            'is_fully_filled': filled_size == requested_size,
+            'is_unfilled': filled_size == 0,
+            'actual_entry_price': actual_entry,
+        }
 
     def step(self, allow_entry=True):
         with self.lock:
@@ -246,12 +391,46 @@ class CRTTrader:
                 self.status['trades_today'] = count
                 self.status['state'] = 'ARMED' if self.enabled else 'OFF'
                 self.status['reason'] = sig['reason']
+
+                # --- Continuous bracket/protection verification ---
+                if active:
+                    protected, unprotected, protection_detail = self._verify_position_protection(positions, orders)
+                    self.status['protection_status'] = protection_detail
+                    self.status['protection_verified'] = protected
+
+                    if not protected:
+                        # Attempt automatic bracket recovery.
+                        recovered = self._attempt_bracket_recovery(unprotected, product)
+                        if recovered:
+                            # Re-verify after recovery.
+                            orders_after = self.pages('get_open_orders', {})
+                            protected, _, protection_detail = self._verify_position_protection(positions, orders_after)
+                            self.status['open_orders'] = orders_after
+                            self.status['protection_status'] = protection_detail + ' (recovered)'
+                            self.status['protection_verified'] = protected
+                            if protected:
+                                self._bracket_recovery_attempts = 0  # Reset only on verified success.
+
+                        if not protected:
+                            # Circuit breaker: UNPROTECTED_POSITION state.
+                            self.enabled = False
+                            self.status.update(
+                                state='UNPROTECTED_POSITION',
+                                reason=f'CRITICAL: {protection_detail}. Entries disabled. '
+                                       f'Recovery attempted {self._bracket_recovery_attempts}/{self._max_bracket_recovery_attempts} times. '
+                                       f'Inspect Delta immediately and manually verify/place bracket orders.',
+                                error=f'Position without SL/TP protection detected. Automatic recovery failed.'
+                            )
+                            return
+
                 # Exchange brackets continue managing existing positions even when entries are OFF.
                 if active or orders:
                     self.status['reason'] = 'Existing position/order: no additional entry; exchange exits remain active'
                     return
                 if not self.enabled or not allow_entry:
                     return
+                # Reset recovery counter when no active positions.
+                self._bracket_recovery_attempts = 0
                 if self.db.execute("SELECT 1 FROM intents WHERE state IN ('SUBMITTING','UNKNOWN')").fetchone():
                     raise ValueError('Uncertain previous submission; no new entries')
                 if count >= limits['max_trades_per_day'] or pnl >= limits['daily_profit_inr'] or pnl <= -limits['daily_loss_inr']:
@@ -320,9 +499,44 @@ class CRTTrader:
                     if (number(order.get('bracket_stop_loss_price')) != number(payload['bracket_stop_loss_price']) or
                             number(order.get('bracket_take_profit_price')) != number(payload['bracket_take_profit_price'])):
                         raise ValueError('Order protection not confirmed; inspect Delta immediately')
-                    self.db.execute('UPDATE intents SET response=?, state=? WHERE id=?', (json.dumps(response), 'ACKNOWLEDGED', sig['id']))
+
+                    # --- Partial-fill reconciliation and real-fill risk ---
+                    fill_info = self._reconcile_fill_size(response, payload)
+                    response_record = response if isinstance(response, dict) else {}
+                    response_record = dict(response_record,
+                                           _fill_reconciliation=fill_info)
+
+                    if fill_info['is_unfilled']:
+                        # IOC was fully cancelled; no position or risk exposure.
+                        self.db.execute('UPDATE intents SET response=?, state=? WHERE id=?',
+                                        (json.dumps(response_record), 'CANCELLED_UNFILLED', sig['id']))
+                        self.db.commit()
+                        self.status['reason'] = 'IOC order fully cancelled (zero fill); no position opened'
+                        return
+
+                    if fill_info['is_partial']:
+                        # Partial fill: position exists but is smaller than requested.
+                        # Log it and acknowledge — bracket protection covers the filled portion.
+                        response_record['_partial_fill_warning'] = (
+                            f"Requested {fill_info['requested_size']} contracts, "
+                            f"filled {fill_info['filled_size']}, "
+                            f"unfilled {fill_info['unfilled_size']}"
+                        )
+
+                    # Compute actual risk from real fill price, not the IOC limit cap.
+                    actual_entry = fill_info['actual_entry_price']
+                    if actual_entry > 0:
+                        actual_risk_per_contract = abs(actual_entry - sig['stop']) * number(product['contract_value']) * limits['quote_to_inr']
+                        actual_total_risk = actual_risk_per_contract * fill_info['filled_size']
+                        response_record['_actual_risk_inr'] = actual_total_risk
+                        response_record['_actual_entry_price'] = actual_entry
+
+                    self.db.execute('UPDATE intents SET response=?, state=? WHERE id=?',
+                                    (json.dumps(response_record), 'ACKNOWLEDGED', sig['id']))
                     self.db.commit()
                     self.status['reason'] = 'CRT bracket order acknowledged by Delta'
+                    if fill_info['is_partial']:
+                        self.status['reason'] += f" (partial fill: {fill_info['filled_size']}/{fill_info['requested_size']})"
                 except Exception:
                     self.db.execute("UPDATE intents SET state='UNKNOWN' WHERE id=?", (sig['id'],))
                     self.db.commit()
@@ -336,7 +550,9 @@ class CRTTrader:
             value = copy.deepcopy(self.status)
             value.update(enabled=self.enabled, risk_limits=self.config['risk_limits'], strategy='CRT · ETHUSD · 15m',
                          live_permitted=os.environ.get('CRT_LIVE_ENABLED') == '1', win_rate=None,
-                         performance_note='No verified CRT closed-trade performance yet')
+                         performance_note='No verified CRT closed-trade performance yet',
+                         bracket_recovery_attempts=self._bracket_recovery_attempts,
+                         max_bracket_recovery_attempts=self._max_bracket_recovery_attempts)
             if self.db:
                 value['intents'] = [dict(zip(('id','day','payload','response','state'), row)) for row in self.db.execute('SELECT * FROM intents ORDER BY rowid DESC LIMIT 30')]
             return value

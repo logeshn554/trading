@@ -409,6 +409,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'")
+        if PUBLIC_MODE:
+            self.send_header("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
         super().end_headers()
 
     def _send_json(self, value: object, status: int = 200):

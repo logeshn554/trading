@@ -29,8 +29,17 @@ class FakeClient:
         self.transactions = []
         self.positions = []
         self.rows = copy.deepcopy(ROWS)
+        self.open_orders = []
+        self._partial_fill = False
+        self._zero_fill = False
+        self._avg_fill_price = None
+        self._place_bracket_available = False
+        self._place_bracket_calls = []
     def available_tools(self):
-        return {'place_order'}
+        tools = {'place_order'}
+        if self._place_bracket_available:
+            tools.add('place_bracket_order')
+        return tools
     def tool_schema(self, name):
         return {'properties': dict.fromkeys(('bracket_stop_loss_price','bracket_take_profit_price','client_order_id','time_in_force'))}
     def call(self, name, args=None):
@@ -39,14 +48,27 @@ class FakeClient:
                         contract_type='perpetual_futures',contract_unit_currency='ETH',settling_asset={'symbol':'USD'})
         elif name == 'get_candles': data = self.rows
         elif name == 'get_margined_positions': data = self.positions
-        elif name == 'get_open_orders': data = []
+        elif name == 'get_open_orders': data = self.open_orders
         elif name == 'get_wallet_transactions': data = self.transactions
         elif name == 'get_ticker': data = {'quotes': {'best_bid': '110', 'best_ask': '110.01'}}
         elif name == 'get_wallet_balances': data = [{'asset_symbol':'USD','available_balance':'1000'}]
         elif name == 'place_order':
             self.sent.append(args)
             if self.fail: raise TimeoutError('uncertain')
-            data = dict(args, id=123)
+            result = dict(args, id=123)
+            if self._zero_fill:
+                result['unfilled_size'] = result['size']
+                result['state'] = 'cancelled'
+            elif self._partial_fill:
+                result['unfilled_size'] = max(1, result['size'] // 2)
+            else:
+                result['unfilled_size'] = 0
+            if self._avg_fill_price is not None:
+                result['average_fill_price'] = str(self._avg_fill_price)
+            data = result
+        elif name == 'place_bracket_order':
+            self._place_bracket_calls.append(args)
+            data = {'success': True}
         else: raise AssertionError(name)
         return {'success': True, 'result': data}
 
@@ -147,6 +169,234 @@ class EngineTests(unittest.TestCase):
         with patch.dict(os.environ,{'CRT_LIVE_ENABLED':'0'}):
             with self.assertRaises(ValueError): self.engine.arm(True)
         self.engine.arm(False)
+
+
+class ProtectionTests(unittest.TestCase):
+    """Tests for continuous bracket verification and circuit breaker."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.client = FakeClient()
+        self.engine = CRTTrader(self.client, {'risk_limits': SETTINGS}, self.tmp.name)
+        self.clock = patch('ethresearch.crt_live.time.time', return_value=1801)
+        self.clock.start()
+
+    def tearDown(self):
+        self.engine.stop(); self.clock.stop(); self.tmp.cleanup()
+
+    def test_position_with_brackets_is_protected(self):
+        """Active position with matching SL/TP orders stays in normal state."""
+        self.client.positions = [dict(size=1, product_id=3136)]
+        self.client.open_orders = [
+            dict(product_id=3136, side='sell', order_type='stop_market_order', size=1, stop_price='89.95'),
+            dict(product_id=3136, side='sell', order_type='take_profit_order', size=1, take_profit_price='120'),
+        ]
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertTrue(self.engine.status.get('protection_verified'))
+        self.assertNotEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
+        self.assertTrue(self.engine.enabled)
+
+    def test_position_without_brackets_triggers_circuit_breaker(self):
+        """Active position with no protective orders triggers UNPROTECTED_POSITION."""
+        self.client.positions = [dict(size=1, product_id=3136)]
+        self.client.open_orders = []  # No bracket orders.
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
+        self.assertFalse(self.engine.enabled)
+        self.assertIn('CRITICAL', self.engine.status['reason'])
+        self.assertFalse(self.engine.status.get('protection_verified'))
+
+    def test_position_missing_stop_triggers_circuit_breaker(self):
+        """Position with TP but no SL is still unprotected."""
+        self.client.positions = [dict(size=1, product_id=3136)]
+        self.client.open_orders = [
+            dict(product_id=3136, side='sell', order_type='take_profit_order', size=1, take_profit_price='120'),
+        ]
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
+        self.assertFalse(self.engine.enabled)
+
+    def test_position_missing_tp_triggers_circuit_breaker(self):
+        """Position with SL but no TP is still unprotected."""
+        self.client.positions = [dict(size=1, product_id=3136)]
+        self.client.open_orders = [
+            dict(product_id=3136, side='sell', order_type='stop_market_order', size=1, stop_price='89.95'),
+        ]
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
+        self.assertFalse(self.engine.enabled)
+
+    def test_bracket_recovery_with_place_bracket_order(self):
+        """Successful bracket recovery using place_bracket_order."""
+        self.client.positions = [dict(size=1, product_id=3136, entry_price='110')]
+        self.client.open_orders = []  # Missing protection initially.
+        self.client._place_bracket_available = True
+        self.engine.enabled = True
+
+        # Seed a last acknowledged intent so recovery knows the SL/TP.
+        self.engine.initialize()
+        payload = json.dumps({'product_id': 3136, 'bracket_stop_loss_price': '89.95',
+                              'bracket_take_profit_price': '120'})
+        self.engine.db.execute('INSERT INTO intents VALUES (?,?,?,?,?)',
+                               ('test-recovery', '2026-01-01', payload, None, 'ACKNOWLEDGED'))
+        self.engine.db.commit()
+
+        # After place_bracket_order is called, simulate bracket orders appearing.
+        original_call = self.client.call
+        call_count = [0]
+        def patched_call(name, args=None):
+            result = original_call(name, args)
+            if name == 'place_bracket_order':
+                # Simulate brackets now existing after recovery.
+                self.client.open_orders = [
+                    dict(product_id=3136, side='sell', order_type='stop_market_order', size=1, stop_price='89.95'),
+                    dict(product_id=3136, side='sell', order_type='take_profit_order', size=1, take_profit_price='120'),
+                ]
+            return result
+        self.client.call = patched_call
+
+        self.engine.step()
+        # Recovery should have been attempted and succeeded.
+        self.assertEqual(len(self.client._place_bracket_calls), 1)
+        self.assertTrue(self.engine.status.get('protection_verified'))
+        self.assertTrue(self.engine.enabled)
+        self.assertIn('recovered', self.engine.status.get('protection_status', ''))
+
+    def test_bracket_recovery_max_attempts_exhausted(self):
+        """After max attempts, recovery stops and circuit breaker stays on."""
+        self.client.positions = [dict(size=1, product_id=3136, entry_price='110')]
+        self.client.open_orders = []
+        self.client._place_bracket_available = True
+        self.engine.enabled = True
+
+        # Seed intent for recovery.
+        self.engine.initialize()
+        payload = json.dumps({'product_id': 3136, 'bracket_stop_loss_price': '89.95',
+                              'bracket_take_profit_price': '120'})
+        self.engine.db.execute('INSERT INTO intents VALUES (?,?,?,?,?)',
+                               ('test-exhaust', '2026-01-01', payload, None, 'ACKNOWLEDGED'))
+        self.engine.db.commit()
+
+        # Recovery always fails (open_orders stays empty).
+        # Each step: finds unprotected, attempts recovery (if under max), recovery fails.
+        # After _max_bracket_recovery_attempts (3) failed attempts, no more recovery is tried.
+        for i in range(self.engine._max_bracket_recovery_attempts + 1):
+            self.engine.enabled = True
+            self.engine.step()
+            self.assertEqual(self.engine.status['state'], 'UNPROTECTED_POSITION')
+            self.assertFalse(self.engine.enabled)
+
+        # Counter should be at max (3 actual attempts were made; 4th was skipped).
+        self.assertEqual(self.engine._bracket_recovery_attempts, self.engine._max_bracket_recovery_attempts)
+
+    def test_no_active_positions_resets_recovery_counter(self):
+        """Recovery counter resets when no active positions exist."""
+        self.engine._bracket_recovery_attempts = 3
+        self.engine.enabled = True
+        self.engine.step()  # No positions, so should reset.
+        self.assertEqual(self.engine._bracket_recovery_attempts, 0)
+
+
+class PartialFillTests(unittest.TestCase):
+    """Tests for partial-fill reconciliation and real-fill risk calculation."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.client = FakeClient()
+        self.engine = CRTTrader(self.client, {'risk_limits': SETTINGS}, self.tmp.name)
+        self.clock = patch('ethresearch.crt_live.time.time', return_value=1801)
+        self.clock.start()
+
+    def tearDown(self):
+        self.engine.stop(); self.clock.stop(); self.tmp.cleanup()
+
+    def test_full_fill_acknowledged(self):
+        """Fully filled order gets ACKNOWLEDGED with fill reconciliation data."""
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertEqual(len(self.client.sent), 1)
+        intent = self.engine.db.execute("SELECT state,response FROM intents").fetchone()
+        self.assertEqual(intent[0], 'ACKNOWLEDGED')
+        resp = json.loads(intent[1])
+        fill_info = resp.get('_fill_reconciliation', {})
+        self.assertTrue(fill_info.get('is_fully_filled'))
+        self.assertFalse(fill_info.get('is_partial'))
+
+    def test_zero_fill_recorded_as_cancelled(self):
+        """IOC order with zero fills goes to CANCELLED_UNFILLED, not ACKNOWLEDGED."""
+        self.client._zero_fill = True
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertEqual(len(self.client.sent), 1)
+        intent = self.engine.db.execute("SELECT state FROM intents").fetchone()
+        self.assertEqual(intent[0], 'CANCELLED_UNFILLED')
+        self.assertIn('zero fill', self.engine.status['reason'])
+
+    def test_partial_fill_acknowledged_with_warning(self):
+        """Partial fill gets ACKNOWLEDGED with a partial-fill warning note."""
+        self.client._partial_fill = True
+        # Use max_contracts=2 so engine sends size=2, allowing partial fill (1 of 2).
+        self.engine.config['risk_limits']['max_contracts'] = 2
+        self.engine.enabled = True
+        self.engine.step()
+        self.assertEqual(len(self.client.sent), 1)
+        intent = self.engine.db.execute("SELECT state,response FROM intents").fetchone()
+        self.assertEqual(intent[0], 'ACKNOWLEDGED')
+        resp = json.loads(intent[1])
+        self.assertIn('_partial_fill_warning', resp)
+        fill_info = resp['_fill_reconciliation']
+        self.assertTrue(fill_info['is_partial'])
+        self.assertIn('partial fill', self.engine.status['reason'])
+
+    def test_actual_fill_price_used_for_risk(self):
+        """When average_fill_price is available, risk is computed from that, not the limit cap."""
+        self.client._avg_fill_price = 109.50  # Better than limit price.
+        self.engine.enabled = True
+        self.engine.step()
+        intent = self.engine.db.execute("SELECT response FROM intents").fetchone()
+        resp = json.loads(intent[0])
+        self.assertAlmostEqual(resp['_actual_entry_price'], 109.50)
+        # Actual risk should be based on 109.50, not the limit cap.
+        fill_info = resp['_fill_reconciliation']
+        self.assertAlmostEqual(fill_info['actual_entry_price'], 109.50)
+
+    def test_fill_reconciliation_fallback_to_limit_price(self):
+        """When no average_fill_price, falls back to limit price."""
+        self.client._avg_fill_price = None  # No average fill price.
+        self.engine.enabled = True
+        self.engine.step()
+        intent = self.engine.db.execute("SELECT response FROM intents").fetchone()
+        resp = json.loads(intent[0])
+        fill_info = resp['_fill_reconciliation']
+        # Should fall back to the limit price from payload.
+        self.assertGreater(fill_info['actual_entry_price'], 0)
+
+
+class StatusTests(unittest.TestCase):
+    """Tests for get_status reporting of new fields."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.client = FakeClient()
+        self.engine = CRTTrader(self.client, {'risk_limits': SETTINGS}, self.tmp.name)
+        self.clock = patch('ethresearch.crt_live.time.time', return_value=1801)
+        self.clock.start()
+
+    def tearDown(self):
+        self.engine.stop(); self.clock.stop(); self.tmp.cleanup()
+
+    def test_status_includes_bracket_recovery_fields(self):
+        """get_status includes bracket_recovery_attempts and max."""
+        self.engine.initialize()
+        status = self.engine.get_status()
+        self.assertIn('bracket_recovery_attempts', status)
+        self.assertIn('max_bracket_recovery_attempts', status)
+        self.assertEqual(status['bracket_recovery_attempts'], 0)
+        self.assertEqual(status['max_bracket_recovery_attempts'], 3)
 
 
 class RouteTests(unittest.TestCase):

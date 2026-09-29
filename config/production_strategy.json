@@ -2,7 +2,6 @@
   "strategy_id": "CRT_ETHUSD_15M_V1",
   "product_symbol": "ETHUSD",
   "bar_resolution": "15m",
-  "live_order_submission_enabled": false,
   "risk_limits": {
     "max_trades_per_day": null,
     "max_contracts": null,

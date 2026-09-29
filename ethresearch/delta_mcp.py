@@ -23,6 +23,7 @@ READ_TOOLS = frozenset({
 
 TRADE_TOOLS = frozenset({
     "place_order", "cancel_order", "batch_place_orders", "close_all_positions",
+    "place_bracket_order",
 })
 
 
@@ -74,6 +75,7 @@ class DeltaMcpClient:
         if api_key and api_secret:
             try:
                 from pathlib import Path
+                import stat
                 cfg_dir = Path.home() / ".delta-exchange-mcp"
                 cfg_dir.mkdir(parents=True, exist_ok=True)
                 cfg_file = cfg_dir / "config.env"
@@ -82,6 +84,10 @@ class DeltaMcpClient:
                     f"DELTA_API_KEY={api_key}\nDELTA_API_SECRET={api_secret}\nDELTA_MCP_ENV={self.environment}\nDELTA_MCP_MODE={mode}\n",
                     encoding="utf-8"
                 )
+                # Restrict credential file and directory permissions (non-Windows).
+                if os.name != 'nt':
+                    os.chmod(cfg_file, stat.S_IRUSR | stat.S_IWUSR)           # 0o600
+                    os.chmod(cfg_dir, stat.S_IRWXU)                           # 0o700
             except Exception:
                 pass
 
