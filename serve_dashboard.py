@@ -23,6 +23,29 @@ from ethresearch.crt_live import CRTTrader
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+def load_local_env(path: Path) -> None:
+    """Load literal KEY=value entries without overriding deployment environment variables."""
+    if not path.is_file():
+        return
+    allowed = {'HOST', 'PORT', 'DASHBOARD_PUBLIC', 'DASHBOARD_SESSION_SECRET',
+               'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_ALLOWED_EMAIL',
+               'DASHBOARD_ALLOWED_HOSTS', 'DELTA_API_KEY', 'DELTA_API_SECRET',
+               'DELTA_MCP_ENV', 'CRT_LIVE_ENABLED', 'CRT_STATE_DIR'}
+    for line in path.read_text(encoding='utf-8-sig').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        key, separator, value = line.partition('=')
+        key, value = key.strip(), value.strip()
+        if separator and key in allowed:
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {'\"', "'"}:
+                value = value[1:-1]
+            os.environ.setdefault(key, value)
+
+
+load_local_env(ROOT / '.env')
 WEB_DIR = ROOT / "web"
 STRATEGY = json.loads((ROOT / "config/production_strategy.json").read_text(encoding="utf-8"))
 MCP_ENV = os.environ.get("DELTA_MCP_ENV", "india_prod")

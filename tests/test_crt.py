@@ -52,6 +52,16 @@ class FakeClient:
 
 
 class SignalTests(unittest.TestCase):
+    def test_network_timeout_is_actionable_and_does_not_submit(self):
+        from urllib.error import URLError
+        client = FakeClient()
+        engine = CRTTrader(client, {'risk_limits': SETTINGS})
+        with patch.object(client, 'call', side_effect=RuntimeError('MCP unavailable')):
+            with patch('ethresearch.crt_live.urlopen', side_effect=URLError('handshake timed out')):
+                with self.assertRaisesRegex(ConnectionError, 'Retrying automatically'):
+                    engine.market('get_product', {'symbol': 'ETHUSD'})
+        self.assertEqual(client.sent, [])
+
     def test_long(self):
         s=signal(ROWS,1801,.05)
         self.assertEqual(s['side'],'buy'); self.assertEqual(s['target'],120)
@@ -85,6 +95,22 @@ class EngineTests(unittest.TestCase):
         self.engine.stop();self.clock.stop();self.tmp.cleanup()
     def test_off_never_submits(self):
         self.engine.step();self.assertEqual(self.client.sent,[])
+    def test_missing_conversion_is_explained_without_float_error(self):
+        self.engine.config['risk_limits']['quote_to_inr'] = None
+        self.client.transactions = [dict(transaction_type='commission',asset_symbol='USD',amount='-.1')]
+        self.engine.step()
+        self.assertEqual(self.engine.status['state'], 'SETUP_REQUIRED')
+        self.assertIn('USD-to-INR settlement conversion', self.engine.status['reason'])
+        self.assertIsNone(self.engine.status['daily_net_inr'])
+        self.assertEqual(len(self.engine.status['candles']), 2)
+        self.assertEqual(self.client.sent, [])
+        self.engine.configure(SETTINGS)
+        self.engine.step()
+        self.assertEqual(self.engine.status['state'], 'OFF')
+        self.assertEqual(self.engine.status['missing_settings'], [])
+    def test_null_numeric_input_is_validation_error(self):
+        with self.assertRaisesRegex(ValueError, 'numeric value'):
+            self.engine.configure(dict(SETTINGS,quote_to_inr=None))
     def test_bracket_once_and_durable_restart(self):
         self.engine.enabled=True;self.engine.step();self.engine.step()
         self.assertEqual(len(self.client.sent),1)

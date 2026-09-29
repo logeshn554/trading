@@ -13,6 +13,7 @@ import threading
 import time
 from urllib.parse import urlencode
 from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 
 from ethresearch.crt import signal, closed_candles
 
@@ -22,7 +23,12 @@ LIMITS = ('max_trades_per_day', 'max_contracts', 'risk_per_trade_inr', 'daily_pr
 
 
 def number(value):
-    value = float(value)
+    if value is None or isinstance(value, bool):
+        raise ValueError('A required numeric value is missing or invalid')
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError('A required numeric value is missing or invalid') from None
     if not math.isfinite(value):
         raise ValueError('Invalid numeric exchange value')
     return value
@@ -56,8 +62,17 @@ class CRTTrader:
             if tool not in endpoints:
                 raise
             base = 'https://api.india.delta.exchange' if self.client.environment == 'india_prod' else 'https://cdn-ind.testnet.deltaex.org'
-            with urlopen(base + endpoints[tool], timeout=10) as response:
-                return unwrap(json.load(response))
+            try:
+                with urlopen(base + endpoints[tool], timeout=10) as response:
+                    return unwrap(json.load(response))
+            except HTTPError as exc:
+                raise ConnectionError(f'Delta public API returned HTTP {exc.code}. Retrying automatically; entries blocked.') from None
+            except (URLError, TimeoutError) as exc:
+                raise ConnectionError(
+                    'Cannot connect securely to Delta API on this network. '
+                    'Check your internet connection, VPN or firewall. '
+                    'Retrying automatically; entries blocked until fresh data returns.'
+                ) from None
 
     def initialize(self):
         if self.db is not None:
@@ -184,6 +199,23 @@ class CRTTrader:
                 self.status['positions'] = positions
                 self.status['open_orders'] = orders
                 limits = self.config['risk_limits']
+                missing = [key for key in LIMITS if limits.get(key) is None or limits.get(key) == '']
+                self.status['missing_settings'] = missing
+                if missing:
+                    names = {
+                        'max_trades_per_day': 'maximum daily entry attempts',
+                        'max_contracts': 'maximum contracts',
+                        'risk_per_trade_inr': 'risk per trade (INR)',
+                        'daily_profit_inr': 'daily profit stop (INR)',
+                        'daily_loss_inr': 'daily loss stop (INR)',
+                        'quote_to_inr': 'USD-to-INR settlement conversion',
+                        'fee_bps_per_side': 'fees and taxes per side',
+                        'max_spread_bps': 'maximum spread',
+                        'max_slippage_bps': 'entry slippage cap',
+                    }
+                    message = 'Complete and save Risk limits: ' + ', '.join(names[key] for key in missing) + '.'
+                    self.status.update(state='SETUP_REQUIRED', reason=message, error=message, daily_net_inr=None)
+                    return
                 day_start = datetime.fromtimestamp(now, IST).replace(hour=0, minute=0, second=0, microsecond=0)
                 day = day_start.date().isoformat()
                 transactions = self.pages('get_wallet_transactions', {'start_time_us': int(day_start.timestamp()*1e6), 'end_time_us': int(now*1e6)})
